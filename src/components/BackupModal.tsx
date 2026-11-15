@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   Download,
@@ -8,6 +8,9 @@ import {
   AlertCircle,
   CheckCircle2,
   RefreshCw,
+  HardDrive,
+  Database,
+  FolderOpen,
 } from 'lucide-react';
 import { Expense } from '../types';
 import {
@@ -16,6 +19,7 @@ import {
   parseAndValidateImportJSON,
 } from '../utils/storage';
 import { INITIAL_EXPENSES } from '../utils/seedData';
+import { getSystemHealth, syncBatchToSystem, SystemStats } from '../utils/apiSync';
 import finchIconLightPng from '../assets/finch-icon-light.png';
 
 interface BackupModalProps {
@@ -40,9 +44,38 @@ export const BackupModal: React.FC<BackupModalProps> = ({
     validData?: Expense[];
   }>({ type: 'idle', message: '' });
 
+  const [systemStats, setSystemStats] = useState<SystemStats | null>(null);
+  const [isSyncingToSystem, setIsSyncingToSystem] = useState(false);
+  const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    if (isOpen) {
+      getSystemHealth().then((stats) => setSystemStats(stats));
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
+
+  const handleSyncToSystemDisk = async () => {
+    setIsSyncingToSystem(true);
+    setSyncFeedback(null);
+    try {
+      const ok = await syncBatchToSystem(expenses);
+      if (ok) {
+        const updated = await getSystemHealth();
+        setSystemStats(updated);
+        setSyncFeedback(`Successfully synced ${expenses.length} records to local host system!`);
+      } else {
+        setSyncFeedback('Sync failed. Please check local server.');
+      }
+    } catch (err) {
+      setSyncFeedback('Could not connect to local system API.');
+    } finally {
+      setIsSyncingToSystem(false);
+    }
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -81,21 +114,28 @@ export const BackupModal: React.FC<BackupModalProps> = ({
     onClose();
   };
 
+  const formatBytes = (bytes?: number) => {
+    if (!bytes) return '0 KB';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  };
+
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200">
       <div
-        className="bg-white rounded-2xl max-w-xl w-full shadow-2xl border border-[#e5decb] overflow-hidden my-6"
+        className="bg-white rounded-2xl max-w-xl w-full shadow-2xl border border-[#e5decb] overflow-hidden my-6 flex flex-col max-h-[85vh]"
         role="dialog"
         aria-modal="true"
       >
         {/* Header */}
-        <div className="bg-[#0F3B2E] text-[#FFF8EE] px-6 py-4 flex items-center justify-between border-b border-[#185241]">
+        <div className="bg-[#0F3B2E] text-[#FFF8EE] px-6 py-4 flex items-center justify-between border-b border-[#185241] flex-shrink-0">
           <div className="flex items-center space-x-3">
-            <img src={finchIconLightPng} alt="finch" className="w-8 h-8 object-contain flex-shrink-0" />
+            <img src={finchIconLightPng} alt="Finch" className="w-8 h-8 object-contain flex-shrink-0" />
             <div>
-              <h2 className="text-base font-bold">Data, Backup & Restore</h2>
+              <h2 className="text-base font-bold">Data & System Storage</h2>
               <p className="text-xs text-[#d8cfbe]">
-                Persisted in browser localStorage • {expenses.length} expenses currently saved
+                Persistent local disk storage + browser offline cache • {expenses.length} expenses
               </p>
             </div>
           </div>
@@ -107,7 +147,71 @@ export const BackupModal: React.FC<BackupModalProps> = ({
           </button>
         </div>
 
-        <div className="p-6 space-y-6 max-h-[80vh] overflow-y-auto">
+        <div className="p-6 space-y-6 overflow-y-auto flex-1">
+          {/* Section 0: Host Computer System Storage (SQLite + Disk) */}
+          <div className="p-4 rounded-xl border border-[#C89B3C]/50 bg-[#FAF7F0] space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <HardDrive className="w-4 h-4 text-[#0F3B2E]" />
+                <h3 className="text-xs font-bold text-[#0F3B2E] uppercase tracking-wider">
+                  Host Machine Storage (SQLite & Filesystem)
+                </h3>
+              </div>
+              <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                ● {systemStats?.status === 'connected' ? 'Active & Synced' : 'Offline'}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-[#42524a]">
+              <div className="bg-white p-2.5 rounded-lg border border-[#e5decb] space-y-1">
+                <div className="flex items-center text-[#0F3B2E] font-bold gap-1.5">
+                  <Database className="w-3.5 h-3.5 text-[#C89B3C]" />
+                  <span>Database File</span>
+                </div>
+                <div className="font-mono text-[10px] text-gray-600 truncate" title="data/finch.db">
+                  data/finch.db
+                </div>
+                <div className="text-[10px] text-[#7e998e]">
+                  Size: {formatBytes(systemStats?.databaseSizeBytes)} • {systemStats?.totalExpensesCount ?? expenses.length} items
+                </div>
+              </div>
+
+              <div className="bg-white p-2.5 rounded-lg border border-[#e5decb] space-y-1">
+                <div className="flex items-center text-[#0F3B2E] font-bold gap-1.5">
+                  <FolderOpen className="w-3.5 h-3.5 text-[#C89B3C]" />
+                  <span>Receipts Folder</span>
+                </div>
+                <div className="font-mono text-[10px] text-gray-600 truncate" title="data/receipts/">
+                  data/receipts/
+                </div>
+                <div className="text-[10px] text-[#7e998e]">
+                  Size: {formatBytes(systemStats?.totalReceiptsSizeBytes)} • {systemStats?.totalReceiptsCount ?? 0} files
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-1 flex items-center justify-between">
+              <span className="text-[10px] text-[#7e998e]">
+                All data is saved locally on your computer with unlimited capacity.
+              </span>
+              <button
+                type="button"
+                onClick={handleSyncToSystemDisk}
+                disabled={isSyncingToSystem}
+                className="px-3 py-1.5 rounded-lg bg-[#0F3B2E] text-[#FFF8EE] text-[11px] font-bold hover:bg-[#185241] transition-all flex items-center gap-1.5 flex-shrink-0"
+              >
+                <RefreshCw className={`w-3 h-3 text-[#C89B3C] ${isSyncingToSystem ? 'animate-spin' : ''}`} />
+                <span>{isSyncingToSystem ? 'Syncing...' : 'Sync Now to SQLite'}</span>
+              </button>
+            </div>
+
+            {syncFeedback && (
+              <div className="text-[11px] text-emerald-800 font-semibold bg-emerald-50 p-2 rounded border border-emerald-200">
+                {syncFeedback}
+              </div>
+            )}
+          </div>
+
           {/* Section 1: Export */}
           <div>
             <h3 className="text-xs font-bold text-[#0F3B2E] uppercase tracking-wider mb-2 flex items-center">
@@ -122,7 +226,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
               {/* Export JSON */}
               <button
                 onClick={() => exportToJSON(expenses)}
-                className="flex items-center justify-between p-3.5 rounded-xl border border-[#d9cfbe] bg-[#FAF7F0] hover:bg-[#f2ecdf] hover:border-[#0F3B2E] transition-all group text-left"
+                className="flex items-center justify-between p-3.5 rounded-xl border border-[#d9cfbe] bg-[#FAF7F0] hover:bg-[#f2ecdf] hover:border-[#0F3B2E] transition-all group text-left cursor-pointer"
               >
                 <div className="flex items-center space-x-3">
                   <div className="w-9 h-9 rounded-lg bg-[#E8F3EE] text-[#0F3B2E] flex items-center justify-center group-hover:scale-105 transition-transform">
@@ -139,7 +243,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
               {/* Export CSV */}
               <button
                 onClick={() => exportToCSV(expenses)}
-                className="flex items-center justify-between p-3.5 rounded-xl border border-[#d9cfbe] bg-[#FAF7F0] hover:bg-[#f2ecdf] hover:border-[#0F3B2E] transition-all group text-left"
+                className="flex items-center justify-between p-3.5 rounded-xl border border-[#d9cfbe] bg-[#FAF7F0] hover:bg-[#f2ecdf] hover:border-[#0F3B2E] transition-all group text-left cursor-pointer"
               >
                 <div className="flex items-center space-x-3">
                   <div className="w-9 h-9 rounded-lg bg-[#f9f3e4] text-[#C89B3C] flex items-center justify-center group-hover:scale-105 transition-transform">
@@ -254,7 +358,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
                     onClose();
                   }
                 }}
-                className="px-3 py-1.5 rounded-lg border border-[#EDD4BE] bg-[#FAF0E6] text-[#8A5323] hover:bg-[#F3E1CF] text-xs font-semibold transition-colors flex-shrink-0 ml-3"
+                className="px-3 py-1.5 rounded-lg border border-[#EDD4BE] bg-[#FAF0E6] text-[#8A5323] hover:bg-[#F3E1CF] text-xs font-semibold transition-colors flex-shrink-0 ml-3 cursor-pointer"
               >
                 Reset to Demo Data
               </button>
@@ -263,10 +367,10 @@ export const BackupModal: React.FC<BackupModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-3.5 bg-[#FAF7F0] border-t border-[#f0ebd9] flex justify-end">
+        <div className="px-6 py-3.5 bg-[#FAF7F0] border-t border-[#f0ebd9] flex justify-end flex-shrink-0">
           <button
             onClick={onClose}
-            className="px-4 py-2 rounded-lg border border-[#d9cfbe] text-xs font-semibold text-[#5a6e64] hover:bg-white transition-colors"
+            className="px-4 py-2 rounded-lg border border-[#d9cfbe] text-xs font-semibold text-[#5a6e64] hover:bg-white transition-colors cursor-pointer"
           >
             Close
           </button>

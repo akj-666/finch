@@ -21,13 +21,26 @@ import { INITIAL_EXPENSES } from './utils/seedData';
 import { generateExpensePDF } from './utils/pdfGenerator';
 import { formatTimeline } from './utils/formatters';
 import { saveReceipt, deleteReceipt, getReceipt } from './utils/receiptStorage';
-import { CheckCircle2, Plus, MapPin } from 'lucide-react';
+import {
+  getSystemHealth,
+  fetchSystemExpenses,
+  saveExpenseToSystem,
+  deleteExpenseFromSystem,
+  saveReceiptToSystem,
+  deleteReceiptFromSystem,
+  syncBatchToSystem,
+  SystemStats,
+} from './utils/apiSync';
+import { CheckCircle2, Plus, MapPin, HardDrive } from 'lucide-react';
 import finchIconPng from './assets/finch-icon.png';
 import finchIconLightPng from './assets/finch-icon-light.png';
 
 export const App: React.FC = () => {
-  // Primary expenses state persisted in localStorage
+  // Primary expenses state
   const [expenses, setExpenses] = useState<Expense[]>(() => loadExpenses());
+
+  // Local System Backend health & sync status
+  const [systemStats, setSystemStats] = useState<SystemStats | null>(null);
 
   // Filter state
   const [filters, setFilters] = useState<FilterState>({
@@ -64,7 +77,36 @@ export const App: React.FC = () => {
     }, 3500);
   };
 
-  // Sync with localStorage on any state modification
+  // 1. Initial Connection with Local Machine Backend System
+  useEffect(() => {
+    let isMounted = true;
+    (async () => {
+      const health = await getSystemHealth();
+      if (!isMounted) return;
+      setSystemStats(health);
+
+      if (health.status === 'connected') {
+        const remoteList = await fetchSystemExpenses();
+        if (!isMounted) return;
+
+        if (remoteList && remoteList.length > 0) {
+          // If system database has data, load it as source of truth
+          setExpenses(remoteList);
+        } else {
+          // If system database is fresh/empty, seed it with current expenses
+          await syncBatchToSystem(expenses);
+          const updated = await getSystemHealth();
+          if (isMounted) setSystemStats(updated);
+        }
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // 2. Sync with browser localStorage as reliable local cache
   useEffect(() => {
     saveExpenses(expenses);
   }, [expenses]);
@@ -212,46 +254,50 @@ export const App: React.FC = () => {
     const now = new Date().toISOString();
     const targetId = editId || `exp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
 
-    // Handle receipt persistence in IndexedDB
+    // 1. Browser-local IndexedDB persistence
     if (receiptData) {
       await saveReceipt(targetId, receiptData);
     } else if (receiptData === null) {
       await deleteReceipt(targetId);
     }
 
-    if (editId) {
-      // Edit existing
-      setExpenses((prev) =>
-        prev.map((item) =>
-          item.id === editId
-            ? {
-                ...item,
-                ...data,
-                updatedAt: now,
-              }
-            : item
-        )
-      );
-      showToast('Expense updated successfully.');
-    } else {
-      // Add new
-      const newExpense: Expense = {
-        ...data,
-        id: targetId,
-        createdAt: now,
-        updatedAt: now,
-      };
-      setExpenses((prev) => [newExpense, ...prev]);
-      showToast('New expense recorded to ledger.');
+    // 2. Build complete expense record
+    const updatedRecord: Expense = {
+      ...data,
+      id: targetId,
+      createdAt: editId ? (editingExpense?.createdAt || now) : now,
+      updatedAt: now,
+    };
+
+    // 3. Persist directly to host machine SQLite and filesystem
+    await saveExpenseToSystem(updatedRecord);
+    if (receiptData) {
+      await saveReceiptToSystem(targetId, receiptData.dataUrl, receiptData.name);
+    } else if (receiptData === null) {
+      await deleteReceiptFromSystem(targetId);
     }
+
+    // 4. Update UI State
+    if (editId) {
+      setExpenses((prev) => prev.map((item) => (item.id === editId ? updatedRecord : item)));
+      showToast('Expense updated & saved to system disk.');
+    } else {
+      setExpenses((prev) => [updatedRecord, ...prev]);
+      showToast('New expense recorded to system database.');
+    }
+
     setEditingExpense(null);
   };
 
   const handleConfirmDelete = async () => {
     if (!deletingExpense) return;
+
+    // Delete from IndexedDB and local system database
     await deleteReceipt(deletingExpense.id);
+    await deleteExpenseFromSystem(deletingExpense.id);
+
     setExpenses((prev) => prev.filter((e) => e.id !== deletingExpense.id));
-    showToast(`Deleted "${deletingExpense.description}".`);
+    showToast(`Deleted "${deletingExpense.description}" from system.`);
     setDeletingExpense(null);
   };
 
@@ -265,25 +311,27 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleImportExpenses = (importedData: Expense[], mode: 'replace' | 'merge') => {
+  const handleImportExpenses = async (importedData: Expense[], mode: 'replace' | 'merge') => {
+    let nextList: Expense[] = [];
     if (mode === 'replace') {
-      setExpenses(importedData);
-      showToast(`Imported ${importedData.length} records (replaced existing).`);
+      nextList = importedData;
     } else {
-      // Merge: replace items with matching IDs, append new ones
-      setExpenses((prev) => {
-        const idMap = new Map<string, Expense>();
-        prev.forEach((e) => idMap.set(e.id, e));
-        importedData.forEach((e) => idMap.set(e.id, e));
-        return Array.from(idMap.values());
-      });
-      showToast(`Merged ${importedData.length} imported records.`);
+      const idMap = new Map<string, Expense>();
+      expenses.forEach((e) => idMap.set(e.id, e));
+      importedData.forEach((e) => idMap.set(e.id, e));
+      nextList = Array.from(idMap.values());
     }
+
+    setExpenses(nextList);
+    // Sync all imported data to host SQLite database
+    await syncBatchToSystem(nextList);
+    showToast(`Saved ${importedData.length} records to local system database.`);
   };
 
-  const handleResetToDemoData = () => {
+  const handleResetToDemoData = async () => {
     setExpenses(INITIAL_EXPENSES);
-    showToast('Reset ledger to Finch sample records.');
+    await syncBatchToSystem(INITIAL_EXPENSES);
+    showToast('Reset system ledger to Finch sample records.');
   };
 
   const handleDownloadPDF = () => {
@@ -307,7 +355,7 @@ export const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#FFF8EE] flex flex-col font-sans">
-      {/* Top Navigation & App Header (Contains Download PDF Report button; No separate Add Expense button) */}
+      {/* Top Navigation & App Header */}
       <Header
         onDownloadPDF={handleDownloadPDF}
         onOpenBackup={() => setIsBackupModalOpen(true)}
@@ -319,10 +367,7 @@ export const App: React.FC = () => {
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6">
-        {/* Secondary Bar directly below top navigation:
-            - Concise, useful copy (no filler, no kiosk)
-            - Single action: Record Expense button
-            - Duplicate PDF button removed */}
+        {/* Secondary Bar directly below top navigation */}
         <div className="bg-gradient-to-r from-[#0F3B2E] to-[#185241] rounded-2xl p-4 sm:p-5 text-[#FFF8EE] shadow-sm mb-5 sm:mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 border border-[#C89B3C]/30">
           <div className="flex items-center space-x-3">
             <div className="flex-shrink-0 flex items-center justify-center p-2 rounded-xl bg-white/10 backdrop-blur-xs">
@@ -347,7 +392,7 @@ export const App: React.FC = () => {
             </div>
           </div>
 
-          {/* Single action for adding an expense: Record Expense button (duplicate PDF button removed) */}
+          {/* Single action for adding an expense: Record Expense button */}
           <div className="flex items-center self-stretch sm:self-auto flex-shrink-0 pt-1 sm:pt-0">
             <button
               onClick={() => {
@@ -362,7 +407,7 @@ export const App: React.FC = () => {
           </div>
         </div>
 
-        {/* 1. Summary Cards (Mobile-first compact 2x2 grid) */}
+        {/* 1. Summary Cards */}
         <SummaryCards
           summary={summary}
           isFiltered={isFiltered}
@@ -384,7 +429,7 @@ export const App: React.FC = () => {
           filteredCount={filteredExpenses.length}
         />
 
-        {/* 4. Expense Table / Ledger (Subtotal sum row removed; receipt actions added) */}
+        {/* 4. Expense Table / Ledger */}
         <ExpenseTable
           expenses={sortedExpenses}
           sortState={sortState}
@@ -404,7 +449,7 @@ export const App: React.FC = () => {
         />
       </main>
 
-      {/* Footer: Bottom-left shows only the company name: Finch */}
+      {/* Footer: Bottom-left shows only the company name: Finch; Right shows Host System status */}
       <footer className="bg-[#FAF7F0] border-t border-[#e5decb] py-5 text-xs text-[#6e8278]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3">
           {/* Bottom-left area: Show ONLY the company name: Finch */}
@@ -413,8 +458,16 @@ export const App: React.FC = () => {
             <span className="font-bold text-sm text-[#0F3B2E]">Finch</span>
           </div>
 
-          <div className="text-[11px] text-[#7e998e] text-center sm:text-right">
-            Browser local storage active • Verified offline persistence
+          {/* Right status: Shows host system disk persistence */}
+          <div className="flex items-center space-x-2 text-[11px] text-[#5a6e64]">
+            <HardDrive className="w-3.5 h-3.5 text-[#C89B3C]" />
+            <span>
+              {systemStats?.status === 'connected' ? (
+                <>Host Storage Active: <strong className="text-[#0F3B2E]">SQLite (data/finch.db) & data/receipts/</strong></>
+              ) : (
+                <>Local Storage Active • Offline Persistence Ready</>
+              )}
+            </span>
           </div>
         </div>
       </footer>
