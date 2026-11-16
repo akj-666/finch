@@ -3,6 +3,62 @@ import { isDemoExpense } from './seedData';
 
 const STORAGE_KEY = 'finch_expenses_v1';
 const LEGACY_STORAGE_KEY = 'etchr_expenses_v1';
+const TOMBSTONES_KEY = 'finch_tombstones_v1';
+const INITIALIZED_KEY = 'finch_app_initialized_v1';
+
+/**
+ * Retrieve the map of deleted record IDs (tombstones) and their deletion timestamps.
+ */
+export function getTombstones(): Record<string, string> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(TOMBSTONES_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+/**
+ * Record a deletion tombstone so this expense ID will never be resurrected
+ * by two-way synchronization or page reloads.
+ */
+export function recordTombstone(id: string, deletedAt?: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const tombstones = getTombstones();
+    tombstones[id] = deletedAt || new Date().toISOString();
+    localStorage.setItem(TOMBSTONES_KEY, JSON.stringify(tombstones));
+  } catch (e) {
+    console.error('Failed to save deletion tombstone:', e);
+  }
+}
+
+/**
+ * Remove an ID from tombstones (e.g. if explicitly restored or imported).
+ */
+export function clearTombstone(id: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const tombstones = getTombstones();
+    if (tombstones[id]) {
+      delete tombstones[id];
+      localStorage.setItem(TOMBSTONES_KEY, JSON.stringify(tombstones));
+    }
+  } catch (e) {}
+}
+
+/**
+ * Check if a record ID has been deleted.
+ * If the record has an updatedAt timestamp newer than the deletion, it is not tombstoned.
+ */
+export function isTombstoned(id: string, updatedAt?: string): boolean {
+  const tombstones = getTombstones();
+  const deletedAt = tombstones[id];
+  if (!deletedAt) return false;
+  if (!updatedAt) return true;
+  return new Date(deletedAt).getTime() >= new Date(updatedAt).getTime();
+}
 
 /**
  * Validate a single candidate expense object.
@@ -63,7 +119,7 @@ export function validateExpense(item: unknown): { isValid: boolean; expense?: Ex
 /**
  * Load expenses from browser localStorage.
  * Ensures a clean start for new users (starting with 0 expenses) while safely filtering
- * out legacy development demo records and preserving any user-entered records.
+ * out legacy development demo records and excluding any tombstoned/deleted records.
  */
 export function loadExpenses(): Expense[] {
   try {
@@ -77,18 +133,28 @@ export function loadExpenses(): Expense[] {
       return [];
     }
 
+    const tombstones = getTombstones();
     const validated: Expense[] = [];
     for (const item of parsed) {
       const res = validateExpense(item);
       if (res.isValid && res.expense) {
         // Only keep genuine user records; discard development demo seeds
-        if (!isDemoExpense(res.expense)) {
-          validated.push(res.expense);
+        if (isDemoExpense(res.expense)) continue;
+
+        // Discard any record that was previously deleted (tombstone)
+        const deletedAt = tombstones[res.expense.id];
+        if (
+          deletedAt &&
+          new Date(deletedAt).getTime() >= new Date(res.expense.updatedAt || res.expense.createdAt).getTime()
+        ) {
+          continue;
         }
+
+        validated.push(res.expense);
       }
     }
 
-    // If demo items were filtered out, save clean state back to storage
+    // If demo or tombstoned items were filtered out, save clean state back to storage
     if (parsed.length !== validated.length) {
       saveExpenses(validated);
     }
@@ -101,14 +167,28 @@ export function loadExpenses(): Expense[] {
 }
 
 /**
- * Persist expenses into localStorage.
+ * Persist expenses into localStorage immediately.
+ * Also marks the app as initialized so reloading an empty ledger will NEVER re-seed demo data.
  */
 export function saveExpenses(expenses: Expense[]): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(expenses));
+    localStorage.setItem(INITIALIZED_KEY, 'true');
   } catch (err) {
     console.error('Failed to save expenses to localStorage:', err);
   }
+}
+
+/**
+ * Immediately removes an expense by ID from localStorage and records a tombstone.
+ * Returns the newly filtered list of expenses.
+ */
+export function removeExpenseFromStorage(id: string): Expense[] {
+  recordTombstone(id);
+  const current = loadExpenses();
+  const filtered = current.filter((e) => e.id !== id);
+  saveExpenses(filtered);
+  return filtered;
 }
 
 /**

@@ -137,6 +137,17 @@ export async function ensureSchema(customUrl) {
     try {
       await client`ALTER TABLE receipts ADD COLUMN IF NOT EXISTS data_url TEXT;`;
     } catch (e) {}
+
+    await client`
+      CREATE TABLE IF NOT EXISTS deleted_expenses (
+        id VARCHAR(100) PRIMARY KEY,
+        workspace_id VARCHAR(100) NOT NULL DEFAULT 'default',
+        deleted_at VARCHAR(50) NOT NULL
+      );
+    `;
+    await client`
+      CREATE INDEX IF NOT EXISTS idx_deleted_workspace ON deleted_expenses(workspace_id);
+    `;
   } else {
     // LibSQL / SQLite
     await client.execute(`
@@ -200,6 +211,15 @@ export async function ensureSchema(customUrl) {
     } catch (e) {
       // Column already exists
     }
+
+    await client.execute(`
+      CREATE TABLE IF NOT EXISTS deleted_expenses (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL DEFAULT 'default',
+        deleted_at TEXT NOT NULL
+      );
+    `);
+    await client.execute(`CREATE INDEX IF NOT EXISTS idx_deleted_workspace ON deleted_expenses(workspace_id);`);
   }
 
   tablesInitialized = true;
@@ -301,6 +321,9 @@ export async function saveExpense(exp, workspaceId = 'default', customUrl) {
   const updatedAt = now;
 
   if (type === 'postgres') {
+    // Clear any previous deletion tombstone since user is explicitly saving
+    await client`DELETE FROM deleted_expenses WHERE id = ${id} AND workspace_id = ${targetWorkspace};`;
+
     await client`
       INSERT INTO expenses (
         id, workspace_id, date, amount, category, nature, description, kiosk_tag,
@@ -325,6 +348,12 @@ export async function saveExpense(exp, workspaceId = 'default', customUrl) {
         updated_at = excluded.updated_at;
     `;
   } else {
+    // Clear any previous deletion tombstone in SQLite
+    await client.execute({
+      sql: `DELETE FROM deleted_expenses WHERE id = ? AND workspace_id = ?;`,
+      args: [id, targetWorkspace],
+    });
+
     await client.execute({
       sql: `
         INSERT INTO expenses (
@@ -357,12 +386,13 @@ export async function saveExpense(exp, workspaceId = 'default', customUrl) {
 }
 
 /**
- * Delete expense by ID
+ * Delete expense by ID and register deletion tombstone
  */
 export async function deleteExpense(id, workspaceId = 'default', customUrl) {
   await ensureSchema(customUrl);
   const { client, type } = getDatabaseClient(customUrl);
   const targetWorkspace = String(workspaceId || 'default').trim();
+  const now = new Date().toISOString();
 
   await deleteReceipt(id, targetWorkspace, customUrl);
 
@@ -371,14 +401,58 @@ export async function deleteExpense(id, workspaceId = 'default', customUrl) {
       DELETE FROM expenses
       WHERE id = ${String(id)} AND workspace_id = ${targetWorkspace};
     `;
+    await client`
+      INSERT INTO deleted_expenses (id, workspace_id, deleted_at)
+      VALUES (${String(id)}, ${targetWorkspace}, ${now})
+      ON CONFLICT(id) DO UPDATE SET deleted_at = ${now}, workspace_id = ${targetWorkspace};
+    `;
   } else {
     await client.execute({
       sql: `DELETE FROM expenses WHERE id = ? AND workspace_id = ?;`,
       args: [String(id), targetWorkspace],
     });
+    await client.execute({
+      sql: `
+        INSERT INTO deleted_expenses (id, workspace_id, deleted_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET deleted_at = excluded.deleted_at, workspace_id = excluded.workspace_id;
+      `,
+      args: [String(id), targetWorkspace, now],
+    });
   }
 
   return true;
+}
+
+/**
+ * Get map of deleted expense IDs (tombstones)
+ */
+export async function getDeletedExpenseIds(workspaceId = 'default', customUrl) {
+  await ensureSchema(customUrl);
+  const { client, type } = getDatabaseClient(customUrl);
+  const targetWorkspace = String(workspaceId || 'default').trim();
+
+  if (type === 'postgres') {
+    const rows = await client`
+      SELECT id, deleted_at FROM deleted_expenses
+      WHERE workspace_id = ${targetWorkspace};
+    `;
+    const map = {};
+    rows.forEach((r) => {
+      map[r.id] = r.deleted_at;
+    });
+    return map;
+  } else {
+    const res = await client.execute({
+      sql: `SELECT id, deleted_at FROM deleted_expenses WHERE workspace_id = ?;`,
+      args: [targetWorkspace],
+    });
+    const map = {};
+    res.rows.forEach((r) => {
+      map[String(r.id)] = String(r.deleted_at);
+    });
+    return map;
+  }
 }
 
 /**
@@ -540,18 +614,30 @@ export async function deleteReceipt(expenseId, workspaceId = 'default', customUr
 }
 
 /**
- * Batch sync expenses
+ * Batch sync expenses (respects deletion tombstones)
  */
 export async function syncBatchExpenses(expenses, workspaceId = 'default', customUrl) {
   if (!Array.isArray(expenses) || expenses.length === 0) {
     return { savedCount: 0, errors: [] };
   }
 
+  const deletedMap = await getDeletedExpenseIds(workspaceId, customUrl);
   let savedCount = 0;
   const errors = [];
 
   for (const item of expenses) {
     if (item && (item.id || item.description)) {
+      const id = String(item.id || '');
+      const deletedAt = deletedMap[id];
+      // If this item was deleted and the incoming item's updatedAt is not strictly newer, skip it!
+      if (deletedAt) {
+        const itemTime = new Date(item.updatedAt || item.createdAt || 0).getTime();
+        const delTime = new Date(deletedAt).getTime();
+        if (itemTime <= delTime) {
+          continue;
+        }
+      }
+
       try {
         await saveExpense(item, workspaceId, customUrl);
         savedCount++;

@@ -18,7 +18,7 @@ import {
   ExpenseSummary,
   ExpenseCategory,
 } from './types';
-import { loadExpenses, saveExpenses } from './utils/storage';
+import { loadExpenses, saveExpenses, removeExpenseFromStorage, clearTombstone } from './utils/storage';
 import { generateExpensePDF } from './utils/pdfGenerator';
 import { formatTimeline } from './utils/formatters';
 import { saveReceipt, deleteReceipt, getReceipt } from './utils/receiptStorage';
@@ -295,6 +295,9 @@ export const App: React.FC = () => {
       await deleteReceipt(targetId);
     }
 
+    // Clear any previous deletion tombstone for this ID
+    clearTombstone(targetId);
+
     // 2. Build complete expense record
     const updatedRecord: Expense = {
       ...data,
@@ -303,7 +306,15 @@ export const App: React.FC = () => {
       updatedAt: now,
     };
 
-    // 3. Persist directly to shared workspace (handles online/offline seamlessly)
+    // 3. Immediately persist to localStorage synchronously
+    const nextList = editId
+      ? expenses.map((item) => (item.id === editId ? updatedRecord : item))
+      : [updatedRecord, ...expenses];
+    saveExpenses(nextList);
+    setExpenses(nextList);
+    setEditingExpense(null);
+
+    // 4. Persist directly to shared workspace (handles online/offline seamlessly)
     await saveExpenseToSystem(updatedRecord);
     if (receiptData) {
       await saveReceiptToSystem(
@@ -317,29 +328,34 @@ export const App: React.FC = () => {
       await deleteReceiptFromSystem(targetId);
     }
 
-    // 4. Update UI State
     if (editId) {
-      setExpenses((prev) => prev.map((item) => (item.id === editId ? updatedRecord : item)));
       showToast('Expense updated & synced across devices.');
     } else {
-      setExpenses((prev) => [updatedRecord, ...prev]);
       showToast('New expense recorded & synced across devices.');
     }
-
-    setEditingExpense(null);
   };
 
   const handleConfirmDelete = async () => {
     if (!deletingExpense) return;
 
-    // Delete from IndexedDB and shared cloud workspace
-    await deleteReceipt(deletingExpense.id);
-    await deleteExpenseFromSystem(deletingExpense.id);
-    await deleteReceiptFromSystem(deletingExpense.id);
+    const targetId = deletingExpense.id;
+    const targetDesc = deletingExpense.description;
 
-    setExpenses((prev) => prev.filter((e) => e.id !== deletingExpense.id));
-    showToast(`Deleted "${deletingExpense.description}".`);
+    // 1. Immediately remove from local storage & record tombstone synchronously
+    const remaining = removeExpenseFromStorage(targetId);
+    setExpenses(remaining);
     setDeletingExpense(null);
+
+    // 2. Persist deletion to IndexedDB and shared cloud workspace
+    try {
+      await deleteReceipt(targetId);
+      await deleteReceiptFromSystem(targetId);
+      await deleteExpenseFromSystem(targetId);
+      showToast(`Expense deleted: "${targetDesc}".`, 'success');
+    } catch (err) {
+      console.warn('Backend deletion failed or queued:', err);
+      showToast(`Expense deleted: "${targetDesc}".`, 'success');
+    }
   };
 
   const handleRetrySync = async () => {

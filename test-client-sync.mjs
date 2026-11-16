@@ -79,4 +79,43 @@ assert.strictEqual(result3.merged.length, 1);
 assert.strictEqual(result3.needsPush.length, 0);
 console.log('✓ Test 3: Idempotent merge produces zero duplicate records');
 
+// 4. Deleted expense on remote is tombstoned and never resurrected into merged
+const deletedRemoteId = 'exp-deleted-on-phone';
+const remoteWithDeleted = [
+  {
+    id: deletedRemoteId,
+    date: '2026-11-12',
+    amount: 300,
+    category: 'Consumables & Refills',
+    nature: 'OpEx',
+    description: 'Deleted record test',
+    paymentMode: 'Cash',
+    createdAt: '2026-11-12T10:00:00.000Z',
+    updatedAt: '2026-11-12T10:00:00.000Z',
+  },
+];
+const result4 = reconcileExpenses([], remoteWithDeleted, { [deletedRemoteId]: '2026-11-12T12:00:00.000Z' });
+assert.strictEqual(result4.merged.length, 0, 'Tombstoned record must NOT appear in merged results');
+assert.strictEqual(result4.needsRemoteDelete.includes(deletedRemoteId), true, 'Tombstoned record must be scheduled for remote delete');
+console.log('✓ Test 4: Deletion tombstones prevent deleted items from reappearing from remote');
+
+// 5. Deleted expense on local device is never re-uploaded to remote
+const localWithDeleted = [
+  {
+    id: 'exp-deleted-locally',
+    date: '2026-11-11',
+    amount: 1000,
+    category: 'Hardware & Electronics',
+    nature: 'CapEx',
+    description: 'Deleted locally',
+    paymentMode: 'UPI',
+    createdAt: '2026-11-11T10:00:00.000Z',
+    updatedAt: '2026-11-11T10:00:00.000Z',
+  },
+];
+const result5 = reconcileExpenses(localWithDeleted, [], { 'exp-deleted-locally': '2026-11-11T11:00:00.000Z' });
+assert.strictEqual(result5.merged.length, 0, 'Locally deleted record must NOT appear in merged results');
+assert.strictEqual(result5.needsPush.length, 0, 'Locally deleted record must NOT be scheduled to re-upload');
+console.log('✓ Test 5: Locally deleted items are never re-uploaded on refresh or sync');
+
 console.log('\nALL CLIENT SYNC TESTS PASSED! 🎉');

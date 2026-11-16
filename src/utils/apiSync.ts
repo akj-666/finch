@@ -5,6 +5,7 @@
  */
 
 import { Expense } from '../types';
+import { getTombstones, recordTombstone, saveExpenses } from './storage';
 
 export type SyncState = 'synced' | 'syncing' | 'offline' | 'error';
 
@@ -321,10 +322,15 @@ export async function getSystemHealth(): Promise<SystemStats> {
   }
 }
 
+export interface SystemExpensesResponse {
+  expenses: Expense[];
+  deletedIds?: Record<string, string>;
+}
+
 /**
- * Fetch all expenses stored in the active cloud/shared workspace
+ * Fetch all expenses and deletion tombstones stored in the active cloud/shared workspace
  */
-export async function fetchSystemExpenses(): Promise<Expense[] | null> {
+export async function fetchSystemExpenses(): Promise<SystemExpensesResponse | null> {
   try {
     const res = await fetch(`${API_BASE}/expenses`, {
       method: 'GET',
@@ -332,7 +338,10 @@ export async function fetchSystemExpenses(): Promise<Expense[] | null> {
     });
     if (!res.ok) return null;
     const data = await res.json();
-    return Array.isArray(data.expenses) ? data.expenses : null;
+    return {
+      expenses: Array.isArray(data.expenses) ? data.expenses : [],
+      deletedIds: data.deletedIds || {},
+    };
   } catch (err) {
     console.warn('System database not reachable:', err);
     return null;
@@ -471,25 +480,50 @@ export async function syncBatchToSystem(expenses: Expense[]): Promise<SyncResult
 
 /**
  * Intelligent two-way merge of local expenses with remote expenses.
- * Preserves all records without loss, using updatedAt timestamps and stable IDs.
+ * Preserves active records while strictly respecting deletion tombstones,
+ * preventing deleted records from ever resurrecting.
  */
 export function reconcileExpenses(
   localList: Expense[],
-  remoteList: Expense[]
-): { merged: Expense[]; needsPush: Expense[] } {
+  remoteList: Expense[],
+  extraDeletedIds: Record<string, string> = {}
+): { merged: Expense[]; needsPush: Expense[]; needsRemoteDelete: string[] } {
+  const localTombstones = getTombstones();
+  // Merge tombstones from local storage and remote backend
+  const allTombstones: Record<string, string> = { ...localTombstones, ...extraDeletedIds };
+
   const map = new Map<string, Expense>();
   const needsPush: Expense[] = [];
+  const needsRemoteDelete: string[] = [];
 
   // Index remote items
   remoteList.forEach((r) => {
+    // If tombstoned and not updated strictly after deletion, ignore and mark for remote deletion
+    const delTime = allTombstones[r.id];
+    if (delTime) {
+      const rTime = new Date(r.updatedAt || r.createdAt || 0).getTime();
+      if (new Date(delTime).getTime() >= rTime) {
+        needsRemoteDelete.push(r.id);
+        return;
+      }
+    }
     map.set(r.id, r);
   });
 
   // Compare with local items
   localList.forEach((l) => {
+    // If local item is tombstoned, discard it
+    const delTime = allTombstones[l.id];
+    if (delTime) {
+      const lTime = new Date(l.updatedAt || l.createdAt || 0).getTime();
+      if (new Date(delTime).getTime() >= lTime) {
+        return;
+      }
+    }
+
     const remote = map.get(l.id);
     if (!remote) {
-      // Local expense does not exist on remote yet -> keep and push to remote
+      // Local expense does not exist on remote yet and is not deleted -> keep and push to remote
       map.set(l.id, l);
       needsPush.push(l);
     } else {
@@ -508,7 +542,7 @@ export function reconcileExpenses(
     return new Date(b.date).getTime() - new Date(a.date).getTime();
   });
 
-  return { merged, needsPush };
+  return { merged, needsPush, needsRemoteDelete };
 }
 
 /**
@@ -522,9 +556,9 @@ export async function performFullSync(
   // 1. Flush offline queue first
   await flushOfflineQueue();
 
-  // 2. Fetch remote records
-  const remoteExpenses = await fetchSystemExpenses();
-  if (remoteExpenses === null) {
+  // 2. Fetch remote records & remote deletion tombstones
+  const remoteData = await fetchSystemExpenses();
+  if (remoteData === null) {
     updateSyncStatus('offline', 'Shared workspace is currently unreachable. Using local offline records.');
     return {
       success: false,
@@ -533,14 +567,33 @@ export async function performFullSync(
     };
   }
 
-  // 3. Reconcile local and remote
-  const { merged, needsPush } = reconcileExpenses(currentExpenses, remoteExpenses);
+  // 3. Register any remote deletions into local tombstones
+  if (remoteData.deletedIds) {
+    Object.entries(remoteData.deletedIds).forEach(([id, deletedAt]) => {
+      recordTombstone(id, deletedAt);
+    });
+  }
 
-  // 4. If any local records are missing on remote, upload them
+  // 4. Reconcile local and remote
+  const { merged, needsPush, needsRemoteDelete } = reconcileExpenses(
+    currentExpenses,
+    remoteData.expenses,
+    remoteData.deletedIds
+  );
+
+  // 5. If any local tombstones were still present on remote, delete them on remote
+  for (const delId of needsRemoteDelete) {
+    await directDeleteExpense(delId).catch(() => {});
+  }
+
+  // 6. If any genuine local records are missing on remote, upload them
   if (needsPush.length > 0) {
     updateSyncStatus('syncing', `Uploading ${needsPush.length} record(s) to shared workspace...`);
     await syncBatchToSystem(needsPush);
   }
+
+  // 7. Immediately save clean merged state back to local storage
+  saveExpenses(merged);
 
   updateSyncStatus('synced', `Synchronized with workspace "${getWorkspaceId()}"`);
   return {

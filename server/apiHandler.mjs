@@ -8,6 +8,7 @@ import {
   deleteReceipt,
   syncBatchExpenses,
   getSystemStats,
+  getDeletedExpenseIds,
 } from './db.mjs';
 
 async function readBody(req) {
@@ -108,7 +109,8 @@ export async function handleApiRequest(req, res) {
     // 2. Expenses CRUD
     if (pathname === '/api/expenses' && method === 'GET') {
       const expenses = await getAllExpenses(workspaceId, customUrl);
-      sendJson(res, 200, { expenses, workspaceId });
+      const deletedIds = await getDeletedExpenseIds(workspaceId, customUrl);
+      sendJson(res, 200, { expenses, deletedIds, workspaceId });
       return true;
     }
 
