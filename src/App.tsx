@@ -17,7 +17,6 @@ import {
   ExpenseCategory,
 } from './types';
 import { loadExpenses, saveExpenses } from './utils/storage';
-import { INITIAL_EXPENSES } from './utils/seedData';
 import { generateExpensePDF } from './utils/pdfGenerator';
 import { formatTimeline } from './utils/formatters';
 import { saveReceipt, deleteReceipt, getReceipt } from './utils/receiptStorage';
@@ -328,12 +327,6 @@ export const App: React.FC = () => {
     showToast(`Saved ${importedData.length} records to local system database.`);
   };
 
-  const handleResetToDemoData = async () => {
-    setExpenses(INITIAL_EXPENSES);
-    await syncBatchToSystem(INITIAL_EXPENSES);
-    showToast('Reset system ledger to Finch sample records.');
-  };
-
   const handleDownloadPDF = () => {
     generateExpensePDF(
       filteredExpenses,
@@ -495,7 +488,6 @@ export const App: React.FC = () => {
         onClose={() => setIsBackupModalOpen(false)}
         expenses={expenses}
         onImportExpenses={handleImportExpenses}
-        onResetToDemoData={handleResetToDemoData}
       />
 
       <ReceiptViewerModal

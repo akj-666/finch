@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { PieChart, BarChart2, AlertCircle } from 'lucide-react';
+import { PieChart, BarChart2 } from 'lucide-react';
 import { Expense, ExpenseCategory } from '../types';
 import { formatINR } from '../utils/formatters';
 import { CATEGORY_META } from '../utils/categoryMeta';
@@ -97,15 +97,55 @@ export const CategoryChart: React.FC<CategoryChartProps> = ({ expenses, timeline
 
   if (expenses.length === 0) {
     return (
-      <div className="bg-white rounded-xl p-8 border border-[#e5decb] shadow-sm mb-6 text-center">
-        <div className="max-w-sm mx-auto flex flex-col items-center">
-          <div className="w-12 h-12 rounded-full bg-[#f4eee2] text-[#C89B3C] flex items-center justify-center mb-3">
-            <AlertCircle className="w-6 h-6" />
+      <div className="bg-white rounded-xl p-5 border border-[#e5decb] shadow-xs mb-5 sm:mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 mb-4 border-b border-[#f0ebd9] gap-2">
+          <div>
+            <h2 className="text-sm sm:text-base font-bold text-[#0F3B2E] flex items-center space-x-2">
+              <span>Category Spending Breakdown</span>
+              <span className="text-xs font-normal text-[#6e8278]">({timelineLabel})</span>
+            </h2>
+            <p className="text-xs text-[#6e8278] mt-0.5">
+              Distribution across equipment, assets, consumables & operational services
+            </p>
           </div>
-          <h3 className="font-bold text-[#0F3B2E] text-base">No Spending Data in Selected Period</h3>
-          <p className="text-xs text-[#6e8278] mt-1 mb-3">
-            No expenses match the current date range or category filters ({timelineLabel}). Try broadening your filters or add a new expense.
-          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center py-4">
+          <div className="md:col-span-5 flex flex-col items-center justify-center relative">
+            <svg viewBox="0 0 220 220" className="w-48 h-48 sm:w-52 sm:h-52">
+              <circle
+                cx="110"
+                cy="110"
+                r="74"
+                fill="none"
+                stroke="#EDE5D5"
+                strokeWidth="28"
+                strokeDasharray="6 4"
+              />
+              <foreignObject x="45" y="45" width="130" height="130">
+                <div className="w-full h-full flex flex-col items-center justify-center text-center p-2">
+                  <span className="text-[10px] uppercase font-bold text-[#7e998e] tracking-wider leading-none">
+                    Total
+                  </span>
+                  <span className="text-base sm:text-lg font-extrabold text-[#0F3B2E] mt-1">
+                    ₹0.00
+                  </span>
+                  <span className="text-[10px] font-semibold text-[#8c9e94] mt-0.5">
+                    No Expenses
+                  </span>
+                </div>
+              </foreignObject>
+            </svg>
+          </div>
+
+          <div className="md:col-span-7 flex flex-col justify-center text-center md:text-left px-2 sm:px-4">
+            <h3 className="text-sm font-bold text-[#0F3B2E] mb-1">
+              No Spending Recorded
+            </h3>
+            <p className="text-xs text-[#6e8278] max-w-md leading-relaxed">
+              No expenses have been recorded for this period. As you enter company expenditures, Finch will automatically chart category allocations, CapEx vs OpEx distributions, and percentage shares.
+            </p>
+          </div>
         </div>
       </div>
     );

@@ -72,33 +72,49 @@ export const ExpenseTable: React.FC<ExpenseTableProps> = ({
 
   if (expenses.length === 0) {
     return (
-      <div className="bg-white rounded-xl p-8 sm:p-10 border border-[#e5decb] shadow-xs text-center">
+      <div className="bg-white rounded-xl p-8 sm:p-12 border border-[#e5decb] shadow-xs text-center mb-8">
         <div className="max-w-md mx-auto flex flex-col items-center">
-          <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-[#f4eee2] text-[#C89B3C] flex items-center justify-center mb-3 sm:mb-4">
-            <AlertCircle className="w-6 h-6 sm:w-7 sm:h-7" />
-          </div>
-          <h3 className="font-bold text-base sm:text-lg text-[#0F3B2E]">No Expenses Match Your Filters</h3>
-          <p className="text-xs sm:text-sm text-[#6e8278] mt-1 mb-5">
-            {isFiltered
-              ? 'Try widening the date range, selecting "All Categories", or clearing your search term.'
-              : 'You have no recorded expenses yet. Click Record Expense above to add your first entry!'}
-          </p>
-          <div className="flex flex-wrap items-center justify-center gap-3">
-            {isFiltered && (
+          {isFiltered ? (
+            <>
+              <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-[#f4eee2] text-[#C89B3C] flex items-center justify-center mb-3 sm:mb-4">
+                <AlertCircle className="w-6 h-6 sm:w-7 sm:h-7" />
+              </div>
+              <h3 className="font-bold text-base sm:text-lg text-[#0F3B2E]">No Expenses Match Your Filters</h3>
+              <p className="text-xs sm:text-sm text-[#6e8278] mt-1 mb-5">
+                Try widening the date range, selecting "All Categories", or clearing your search term.
+              </p>
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                <button
+                  onClick={onResetFilters}
+                  className="px-4 py-2 bg-[#FAF7F0] border border-[#d9cfbe] text-[#0F3B2E] rounded-lg text-xs sm:text-sm font-semibold hover:bg-[#ede5d5] transition-colors cursor-pointer"
+                >
+                  Clear All Filters
+                </button>
+                <button
+                  onClick={onAddExpense}
+                  className="inline-flex items-center space-x-1.5 px-4 py-2 bg-[#0F3B2E] text-[#FFF8EE] rounded-lg text-xs sm:text-sm font-bold hover:bg-[#185241] shadow-xs transition-colors cursor-pointer"
+                >
+                  <span>Record Expense</span>
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-[#E8F3EE] text-[#0F3B2E] flex items-center justify-center mb-3 sm:mb-4">
+                <FileText className="w-6 h-6 sm:w-7 sm:h-7" />
+              </div>
+              <h3 className="font-bold text-base sm:text-lg text-[#0F3B2E]">No Expenses Recorded Yet</h3>
+              <p className="text-xs sm:text-sm text-[#6e8278] mt-1 mb-5 max-w-sm">
+                Your Finch account is clean and ready. Record your first company expenditure to begin tracking capital assets, operating supplies, and receipt attachments.
+              </p>
               <button
-                onClick={onResetFilters}
-                className="px-4 py-2 bg-[#FAF7F0] border border-[#d9cfbe] text-[#0F3B2E] rounded-lg text-xs sm:text-sm font-semibold hover:bg-[#ede5d5] transition-colors"
+                onClick={onAddExpense}
+                className="inline-flex items-center space-x-2 px-5 py-2.5 bg-[#C89B3C] hover:bg-[#b4892e] text-[#0A261E] rounded-xl text-xs sm:text-sm font-bold shadow-md transition-all active:scale-98 cursor-pointer"
               >
-                Clear All Filters
+                <span>+ Record First Expense</span>
               </button>
-            )}
-            <button
-              onClick={onAddExpense}
-              className="inline-flex items-center space-x-1.5 px-4 py-2 bg-[#0F3B2E] text-[#FFF8EE] rounded-lg text-xs sm:text-sm font-bold hover:bg-[#185241] shadow-xs transition-colors"
-            >
-              <span>Record Expense</span>
-            </button>
-          </div>
+            </>
+          )}
         </div>
       </div>
     );

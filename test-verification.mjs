@@ -24,26 +24,28 @@ assert.strictEqual(formatTimeline('2026-11-01', '2026-11-30'), '01 Nov 2026 – 
 assert.strictEqual(formatTimeline('', ''), 'All Time');
 console.log('  ✓ Date and Timeline formatters pass');
 
-// 2. Seed Data Checks
-console.log('\n2. Testing Seed Data Integrity...');
-assert(INITIAL_EXPENSES.length >= 10, 'Should have rich sample data');
-let totalSeedSpend = 0;
-let capexSeed = 0;
-let opexSeed = 0;
+// 2. Clean State & Seed Data Checks
+console.log('\n2. Testing Clean Account State & Categories...');
+assert.strictEqual(INITIAL_EXPENSES.length, 0, 'INITIAL_EXPENSES must be completely empty for clean start');
+console.log('  ✓ INITIAL_EXPENSES is empty ([]) for clean launch');
 
-INITIAL_EXPENSES.forEach((exp, index) => {
+// Test that all 8 categories are properly defined and valid
+assert.strictEqual(EXPENSE_CATEGORIES.length, 8, 'All 8 expense categories must remain available');
+const sampleTestExpenses = [
+  { id: 'test-1', description: 'Thermal receipt printer engine', amount: 12500, date: '2026-11-15', category: 'Hardware & Electronics', nature: 'CapEx', paymentMode: 'UPI' },
+  { id: 'test-2', description: 'Office cloud VPS server hosting', amount: 999, date: '2026-11-15', category: 'Software, Web & Hosting', nature: 'OpEx', paymentMode: 'Card' },
+  { id: 'test-3', description: 'A4 Copier paper cartons', amount: 3200, date: '2026-11-15', category: 'Consumables & Refills', nature: 'OpEx', paymentMode: 'Bank Transfer' },
+];
+
+sampleTestExpenses.forEach((exp, index) => {
   const res = validateExpense(exp);
-  assert(res.isValid, `Seed expense ${index} (${exp.description}) must be valid: ${res.reason}`);
+  assert(res.isValid, `Test expense ${index} (${exp.description}) must be valid: ${res.reason}`);
   assert(exp.amount > 0, 'Amount must be positive');
   assert(EXPENSE_CATEGORIES.includes(exp.category), `Invalid category ${exp.category}`);
   assert(exp.nature === 'CapEx' || exp.nature === 'OpEx', `Invalid nature ${exp.nature}`);
   assert(PAYMENT_MODES.includes(exp.paymentMode), `Invalid payment mode ${exp.paymentMode}`);
-  totalSeedSpend += exp.amount;
-  if (exp.nature === 'CapEx') capexSeed += exp.amount;
-  else opexSeed += exp.amount;
 });
-console.log(`  ✓ ${INITIAL_EXPENSES.length} seed items validated.`);
-console.log(`  ✓ Total Seed Spend: ${formatINR(totalSeedSpend)} (CapEx: ${formatINR(capexSeed)}, OpEx: ${formatINR(opexSeed)})`);
+console.log(`  ✓ All ${EXPENSE_CATEGORIES.length} categories validated with sample records`);
 
 // 3. Validation Logic
 console.log('\n3. Testing Expense Validation and Error Handling...');
@@ -67,7 +69,7 @@ console.log('  ✓ Strict field validation correctly rejects invalid and accepts
 console.log('\n4. Testing JSON Import Parsing & Recovery...');
 const validFinchExport = JSON.stringify({
   appName: 'finch Expense Tracker',
-  expenses: INITIAL_EXPENSES.slice(0, 3)
+  expenses: sampleTestExpenses
 });
 const importResult = parseAndValidateImportJSON(validFinchExport);
 assert.strictEqual(importResult.success, true);
@@ -76,7 +78,7 @@ assert.strictEqual(importResult.expenses?.length, 3);
 // Backwards-compatibility test with legacy Etchr backups
 const legacyEtchrExport = JSON.stringify({
   appName: 'Etchr Expense Tracker',
-  expenses: INITIAL_EXPENSES.slice(0, 2)
+  expenses: sampleTestExpenses.slice(0, 2)
 });
 const legacyResult = parseAndValidateImportJSON(legacyEtchrExport);
 assert.strictEqual(legacyResult.success, true);

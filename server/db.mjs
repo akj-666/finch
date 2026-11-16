@@ -59,6 +59,33 @@ db.exec(`
 `);
 
 /**
+ * Purge any development sample/demo records (exp-1 to exp-15) from SQLite,
+ * ensuring clean production state while strictly preserving user-entered expenses.
+ */
+export function purgeDemoExpenses() {
+  const demoIds = [
+    'exp-1', 'exp-2', 'exp-3', 'exp-4', 'exp-5',
+    'exp-6', 'exp-7', 'exp-8', 'exp-9', 'exp-10',
+    'exp-11', 'exp-12', 'exp-13', 'exp-14', 'exp-15'
+  ];
+  const placeholders = demoIds.map(() => '?').join(',');
+
+  // Delete receipts linked to demo items
+  const demoReceipts = db.prepare(`SELECT file_path FROM receipts WHERE expense_id IN (${placeholders})`).all(...demoIds);
+  for (const r of demoReceipts) {
+    if (r && r.file_path && fs.existsSync(r.file_path)) {
+      try { fs.unlinkSync(r.file_path); } catch (e) {}
+    }
+  }
+
+  db.prepare(`DELETE FROM receipts WHERE expense_id IN (${placeholders})`).run(...demoIds);
+  db.prepare(`DELETE FROM expenses WHERE id IN (${placeholders})`).run(...demoIds);
+}
+
+// Automatically purge demo seeds on initialization
+purgeDemoExpenses();
+
+/**
  * Convert DB row to Expense TypeScript-compatible object
  */
 function rowToExpense(row) {
@@ -145,7 +172,6 @@ export function deleteExpense(id) {
 }
 
 export function saveReceipt(expenseId, dataUrl, filename = 'receipt.jpg') {
-  // Parse data URL
   const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
   if (!match) {
     throw new Error('Invalid data URL format for receipt');
@@ -155,7 +181,6 @@ export function saveReceipt(expenseId, dataUrl, filename = 'receipt.jpg') {
   const base64Data = match[2];
   const buffer = Buffer.from(base64Data, 'base64');
 
-  // Determine file extension
   let ext = '.jpg';
   if (mimeType.includes('png')) ext = '.png';
   else if (mimeType.includes('webp')) ext = '.webp';
@@ -166,7 +191,6 @@ export function saveReceipt(expenseId, dataUrl, filename = 'receipt.jpg') {
 
   fs.writeFileSync(filePath, buffer);
 
-  // Update receipts table
   const stmt = db.prepare(`
     INSERT INTO receipts (expense_id, filename, mime_type, size_bytes, file_path, created_at)
     VALUES (?, ?, ?, ?, ?, ?)
@@ -180,7 +204,6 @@ export function saveReceipt(expenseId, dataUrl, filename = 'receipt.jpg') {
 
   stmt.run(expenseId, filename, mimeType, buffer.length, filePath, new Date().toISOString());
 
-  // Also update parent expense record
   const updateExpense = db.prepare(`
     UPDATE expenses
     SET has_receipt = 1, receipt_name = ?, receipt_size = ?, updated_at = ?

@@ -1,5 +1,5 @@
 import { Expense, EXPENSE_CATEGORIES, PAYMENT_MODES, ExpenseCategory, ExpenseNature, PaymentMode } from '../types';
-import { INITIAL_EXPENSES } from './seedData';
+import { isDemoExpense } from './seedData';
 
 const STORAGE_KEY = 'finch_expenses_v1';
 const LEGACY_STORAGE_KEY = 'etchr_expenses_v1';
@@ -61,43 +61,42 @@ export function validateExpense(item: unknown): { isValid: boolean; expense?: Ex
 }
 
 /**
- * Load expenses from localStorage with fallback to INITIAL_EXPENSES.
+ * Load expenses from browser localStorage.
+ * Ensures a clean start for new users (starting with 0 expenses) while safely filtering
+ * out legacy development demo records and preserving any user-entered records.
  */
 export function loadExpenses(): Expense[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
     if (!raw) {
-      // First time loading: seed realistic startup expenses
-      saveExpenses(INITIAL_EXPENSES);
-      return INITIAL_EXPENSES;
+      return [];
     }
 
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) {
-      console.warn('Stored expenses is not an array, falling back to seed data');
-      saveExpenses(INITIAL_EXPENSES);
-      return INITIAL_EXPENSES;
+      return [];
     }
 
     const validated: Expense[] = [];
     for (const item of parsed) {
       const res = validateExpense(item);
       if (res.isValid && res.expense) {
-        validated.push(res.expense);
+        // Only keep genuine user records; discard development demo seeds
+        if (!isDemoExpense(res.expense)) {
+          validated.push(res.expense);
+        }
       }
     }
 
-    if (validated.length === 0 && parsed.length > 0) {
-      console.warn('No valid expenses recovered from stored data, resetting to seed data');
-      saveExpenses(INITIAL_EXPENSES);
-      return INITIAL_EXPENSES;
+    // If demo items were filtered out, save clean state back to storage
+    if (parsed.length !== validated.length) {
+      saveExpenses(validated);
     }
 
     return validated;
   } catch (err) {
     console.error('Failed to load expenses from localStorage:', err);
-    saveExpenses(INITIAL_EXPENSES);
-    return INITIAL_EXPENSES;
+    return [];
   }
 }
 
@@ -117,7 +116,7 @@ export function saveExpenses(expenses: Expense[]): void {
  */
 export function exportToJSON(expenses: Expense[]): void {
   const payload = {
-    appName: 'finch Expense Tracker',
+    appName: 'Finch Expense Tracker',
     version: '1.0',
     exportDate: new Date().toISOString(),
     totalRecords: expenses.length,
@@ -154,7 +153,7 @@ export function parseAndValidateImportJSON(jsonText: string): {
     } else {
       return {
         success: false,
-        error: 'Invalid file format. Expected a JSON array of expenses or a finch backup object with an "expenses" list.',
+        error: 'Invalid file format. Expected a JSON array of expenses or a Finch backup object with an "expenses" list.',
       };
     }
 
@@ -209,13 +208,14 @@ export function exportToCSV(expenses: Expense[]): void {
     'Category',
     'Nature',
     'Payment Mode',
-    'Kiosk / Unit Tag',
+    'Tag / Department',
     'Amount (INR)',
-    'Notes / Receipt Ref',
+    'Notes / Memo',
+    'Receipt Attached',
     'ID',
   ];
 
-  const escapeCSV = (value: string | number | undefined | null): string => {
+  const escapeCSV = (value: string | number | boolean | undefined | null): string => {
     if (value === null || value === undefined) return '""';
     const str = String(value);
     return `"${str.replace(/"/g, '""')}"`;
@@ -228,8 +228,9 @@ export function exportToCSV(expenses: Expense[]): void {
     escapeCSV(exp.nature),
     escapeCSV(exp.paymentMode),
     escapeCSV(exp.kioskTag || ''),
-    exp.amount.toFixed(2), // Numeric amount without quotes for spreadsheet math
+    exp.amount.toFixed(2),
     escapeCSV(exp.notes || ''),
+    escapeCSV(exp.hasReceipt ? 'Yes' : 'No'),
     escapeCSV(exp.id),
   ]);
 

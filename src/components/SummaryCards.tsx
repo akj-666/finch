@@ -1,5 +1,5 @@
 import React from 'react';
-import { IndianRupee, Layers, RefreshCw, Trophy, AlertCircle } from 'lucide-react';
+import { IndianRupee, Layers, RefreshCw, Trophy } from 'lucide-react';
 import { ExpenseSummary } from '../types';
 import { formatINR } from '../utils/formatters';
 
@@ -124,10 +124,14 @@ export const SummaryCards: React.FC<SummaryCardsProps> = ({
               </div>
             </>
           ) : (
-            <div className="py-1 flex items-center text-xs text-[#7e998e]">
-              <AlertCircle className="w-3.5 h-3.5 mr-1 text-gray-400" />
-              <span>No expenses</span>
-            </div>
+            <>
+              <div className="text-xs sm:text-sm font-bold text-[#7e998e]">
+                None
+              </div>
+              <div className="text-lg sm:text-2xl font-extrabold text-[#7e998e] tracking-tight mt-0.5">
+                ₹0.00
+              </div>
+            </>
           )}
         </div>
 
@@ -137,7 +141,7 @@ export const SummaryCards: React.FC<SummaryCardsProps> = ({
               {topCategory.percentage.toFixed(1)}% of period
             </span>
           ) : (
-            <span>Adjust filters</span>
+            <span>{allTimeCount === 0 ? 'No expenses recorded' : 'No expenses in filter'}</span>
           )}
         </div>
       </div>

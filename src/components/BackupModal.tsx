@@ -18,7 +18,6 @@ import {
   exportToCSV,
   parseAndValidateImportJSON,
 } from '../utils/storage';
-import { INITIAL_EXPENSES } from '../utils/seedData';
 import { getSystemHealth, syncBatchToSystem, SystemStats } from '../utils/apiSync';
 import finchIconLightPng from '../assets/finch-icon-light.png';
 
@@ -27,7 +26,6 @@ interface BackupModalProps {
   onClose: () => void;
   expenses: Expense[];
   onImportExpenses: (importedExpenses: Expense[], mode: 'replace' | 'merge') => void;
-  onResetToDemoData: () => void;
 }
 
 export const BackupModal: React.FC<BackupModalProps> = ({
@@ -35,7 +33,6 @@ export const BackupModal: React.FC<BackupModalProps> = ({
   onClose,
   expenses,
   onImportExpenses,
-  onResetToDemoData,
 }) => {
   const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge');
   const [importStatus, setImportStatus] = useState<{
@@ -133,9 +130,9 @@ export const BackupModal: React.FC<BackupModalProps> = ({
           <div className="flex items-center space-x-3">
             <img src={finchIconLightPng} alt="Finch" className="w-8 h-8 object-contain flex-shrink-0" />
             <div>
-              <h2 className="text-base font-bold">Data & System Storage</h2>
+              <h2 className="text-base font-bold">Data & Backup Management</h2>
               <p className="text-xs text-[#d8cfbe]">
-                Persistent local disk storage + browser offline cache • {expenses.length} expenses
+                Secure offline persistence • {expenses.length} expenses on record
               </p>
             </div>
           </div>
@@ -154,11 +151,11 @@ export const BackupModal: React.FC<BackupModalProps> = ({
               <div className="flex items-center space-x-2">
                 <HardDrive className="w-4 h-4 text-[#0F3B2E]" />
                 <h3 className="text-xs font-bold text-[#0F3B2E] uppercase tracking-wider">
-                  Host Machine Storage (SQLite & Filesystem)
+                  System Database & Disk Storage
                 </h3>
               </div>
               <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
-                ● {systemStats?.status === 'connected' ? 'Active & Synced' : 'Offline'}
+                ● {systemStats?.status === 'connected' ? 'Active' : 'Offline Cache'}
               </span>
             </div>
 
@@ -166,13 +163,13 @@ export const BackupModal: React.FC<BackupModalProps> = ({
               <div className="bg-white p-2.5 rounded-lg border border-[#e5decb] space-y-1">
                 <div className="flex items-center text-[#0F3B2E] font-bold gap-1.5">
                   <Database className="w-3.5 h-3.5 text-[#C89B3C]" />
-                  <span>Database File</span>
+                  <span>SQLite Database</span>
                 </div>
                 <div className="font-mono text-[10px] text-gray-600 truncate" title="data/finch.db">
                   data/finch.db
                 </div>
                 <div className="text-[10px] text-[#7e998e]">
-                  Size: {formatBytes(systemStats?.databaseSizeBytes)} • {systemStats?.totalExpensesCount ?? expenses.length} items
+                  Size: {formatBytes(systemStats?.databaseSizeBytes)} • {systemStats?.totalExpensesCount ?? expenses.length} records
                 </div>
               </div>
 
@@ -192,16 +189,16 @@ export const BackupModal: React.FC<BackupModalProps> = ({
 
             <div className="pt-1 flex items-center justify-between">
               <span className="text-[10px] text-[#7e998e]">
-                All data is saved locally on your computer with unlimited capacity.
+                All expenses and receipts are stored on disk with high reliability.
               </span>
               <button
                 type="button"
                 onClick={handleSyncToSystemDisk}
                 disabled={isSyncingToSystem}
-                className="px-3 py-1.5 rounded-lg bg-[#0F3B2E] text-[#FFF8EE] text-[11px] font-bold hover:bg-[#185241] transition-all flex items-center gap-1.5 flex-shrink-0"
+                className="px-3 py-1.5 rounded-lg bg-[#0F3B2E] text-[#FFF8EE] text-[11px] font-bold hover:bg-[#185241] transition-all flex items-center gap-1.5 flex-shrink-0 cursor-pointer"
               >
                 <RefreshCw className={`w-3 h-3 text-[#C89B3C] ${isSyncingToSystem ? 'animate-spin' : ''}`} />
-                <span>{isSyncingToSystem ? 'Syncing...' : 'Sync Now to SQLite'}</span>
+                <span>{isSyncingToSystem ? 'Syncing...' : 'Sync to SQLite'}</span>
               </button>
             </div>
 
@@ -319,7 +316,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
 
                   <button
                     onClick={handleConfirmImport}
-                    className="w-full mt-2 py-2 px-3 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs transition-colors shadow-xs"
+                    className="w-full mt-2 py-2 px-3 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs transition-colors shadow-xs cursor-pointer"
                   >
                     Apply Import ({importStatus.validData?.length} records)
                   </button>
@@ -337,31 +334,6 @@ export const BackupModal: React.FC<BackupModalProps> = ({
                   </div>
                 </div>
               )}
-            </div>
-          </div>
-
-          {/* Section 3: Reset / Reload Demo Data */}
-          <div className="pt-4 border-t border-[#f0ebd9]">
-            <div className="flex items-center justify-between">
-              <div>
-                <h4 className="text-xs font-bold text-[#8A5323] uppercase tracking-wider flex items-center">
-                  <RefreshCw className="w-3.5 h-3.5 mr-1" /> Reload Sample Data
-                </h4>
-                <p className="text-xs text-[#6e8278] mt-0.5">
-                  Reset ledger back to the {INITIAL_EXPENSES.length} realistic Finch sample expenses.
-                </p>
-              </div>
-              <button
-                onClick={() => {
-                  if (confirm('Reset all expenses back to default Finch sample records?')) {
-                    onResetToDemoData();
-                    onClose();
-                  }
-                }}
-                className="px-3 py-1.5 rounded-lg border border-[#EDD4BE] bg-[#FAF0E6] text-[#8A5323] hover:bg-[#F3E1CF] text-xs font-semibold transition-colors flex-shrink-0 ml-3 cursor-pointer"
-              >
-                Reset to Demo Data
-              </button>
             </div>
           </div>
         </div>
