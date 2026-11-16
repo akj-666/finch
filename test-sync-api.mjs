@@ -62,9 +62,47 @@ function createMockRes() {
 async function runTests() {
   console.log('=== STARTING SYNC & WORKSPACE API VERIFICATION ===\n');
 
+  // Obtain a valid session token
+  const testPassword = 'KottayamSuperSecret@2026';
+  let sessionToken = null;
+
+  // Try setup if not set, or login
+  {
+    const setupReq = createMockReq({
+      url: '/api/auth/setup',
+      method: 'POST',
+      body: { password: testPassword },
+    });
+    const setupRes = createMockRes();
+    await handleApiRequest(setupReq, setupRes);
+    if (setupRes.response.statusCode === 201) {
+      sessionToken = setupRes.response.body.token;
+    } else {
+      // Password already set, log in
+      const loginReq = createMockReq({
+        url: '/api/auth/login',
+        method: 'POST',
+        body: { password: testPassword },
+      });
+      const loginRes = createMockRes();
+      await handleApiRequest(loginReq, loginRes);
+      assert.strictEqual(loginRes.response.statusCode, 200, 'Login must succeed');
+      sessionToken = loginRes.response.body.token;
+    }
+  }
+
+  assert.ok(sessionToken, 'Must have a valid session token for tests');
+  const authHeaders = {
+    authorization: `Bearer ${sessionToken}`,
+  };
+
   // Test 1: Health & Status
   {
-    const req = createMockReq({ url: '/api/status', method: 'GET', headers: { 'x-workspace-id': 'test-workspace' } });
+    const req = createMockReq({
+      url: '/api/status',
+      method: 'GET',
+      headers: { ...authHeaders, 'x-workspace-id': 'test-workspace' },
+    });
     const res = createMockRes();
     const handled = await handleApiRequest(req, res);
     assert.strictEqual(handled, true);
@@ -90,7 +128,7 @@ async function runTests() {
     const req = createMockReq({
       url: '/api/expenses',
       method: 'POST',
-      headers: { 'x-workspace-id': 'test-workspace' },
+      headers: { ...authHeaders, 'x-workspace-id': 'test-workspace' },
       body: testExpense,
     });
     const res = createMockRes();
@@ -105,7 +143,7 @@ async function runTests() {
   // Test 3: Expense Isolation between Workspaces
   {
     // Retrieve in test-workspace
-    const req1 = createMockReq({ url: '/api/expenses', method: 'GET', headers: { 'x-workspace-id': 'test-workspace' } });
+    const req1 = createMockReq({ url: '/api/expenses', method: 'GET', headers: { ...authHeaders, 'x-workspace-id': 'test-workspace' } });
     const res1 = createMockRes();
     await handleApiRequest(req1, res1);
     const list1 = res1.response.body.expenses;
@@ -113,7 +151,7 @@ async function runTests() {
     assert.ok(found, 'Expense should exist in test-workspace');
 
     // Retrieve in separate workspace
-    const req2 = createMockReq({ url: '/api/expenses', method: 'GET', headers: { 'x-workspace-id': 'different-workspace' } });
+    const req2 = createMockReq({ url: '/api/expenses', method: 'GET', headers: { ...authHeaders, 'x-workspace-id': 'different-workspace' } });
     const res2 = createMockRes();
     await handleApiRequest(req2, res2);
     const list2 = res2.response.body.expenses;
@@ -128,14 +166,14 @@ async function runTests() {
     const req = createMockReq({
       url: '/api/expenses',
       method: 'POST',
-      headers: { 'x-workspace-id': 'test-workspace' },
+      headers: { ...authHeaders, 'x-workspace-id': 'test-workspace' },
       body: updated,
     });
     const res = createMockRes();
     await handleApiRequest(req, res);
     assert.strictEqual(res.response.statusCode, 201);
 
-    const checkReq = createMockReq({ url: '/api/expenses', method: 'GET', headers: { 'x-workspace-id': 'test-workspace' } });
+    const checkReq = createMockReq({ url: '/api/expenses', method: 'GET', headers: { ...authHeaders, 'x-workspace-id': 'test-workspace' } });
     const checkRes = createMockRes();
     await handleApiRequest(checkReq, checkRes);
     const list = checkRes.response.body.expenses;
@@ -152,7 +190,7 @@ async function runTests() {
     const req = createMockReq({
       url: `/api/receipts/${testExpense.id}`,
       method: 'POST',
-      headers: { 'x-workspace-id': 'test-workspace' },
+      headers: { ...authHeaders, 'x-workspace-id': 'test-workspace' },
       body: {
         dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
         name: 'thermal-receipt.png',
@@ -167,7 +205,7 @@ async function runTests() {
     const getReq = createMockReq({
       url: `/api/receipts/${testExpense.id}`,
       method: 'GET',
-      headers: { 'x-workspace-id': 'test-workspace' },
+      headers: { ...authHeaders, 'x-workspace-id': 'test-workspace' },
     });
     const getRes = createMockRes();
     await handleApiRequest(getReq, getRes);
@@ -181,13 +219,13 @@ async function runTests() {
     const req = createMockReq({
       url: `/api/expenses/${testExpense.id}`,
       method: 'DELETE',
-      headers: { 'x-workspace-id': 'test-workspace' },
+      headers: { ...authHeaders, 'x-workspace-id': 'test-workspace' },
     });
     const res = createMockRes();
     await handleApiRequest(req, res);
     assert.strictEqual(res.response.statusCode, 200);
 
-    const checkReq = createMockReq({ url: '/api/expenses', method: 'GET', headers: { 'x-workspace-id': 'test-workspace' } });
+    const checkReq = createMockReq({ url: '/api/expenses', method: 'GET', headers: { ...authHeaders, 'x-workspace-id': 'test-workspace' } });
     const checkRes = createMockRes();
     await handleApiRequest(checkReq, checkRes);
     const item = checkRes.response.body.expenses.find((e) => e.id === testExpense.id);

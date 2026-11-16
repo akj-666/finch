@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "test": "npx tsx test-verification.mjs && node test-sync-api.mjs && npx tsx test-client-sync.mjs",
+    "test": "npx tsx test-verification.mjs && node test-sync-api.mjs && npx tsx test-client-sync.mjs && node test-auth-protection.mjs",
     "preview": "vite preview",
     "start": "node server.mjs"
   },

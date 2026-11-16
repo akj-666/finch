@@ -9,6 +9,15 @@ import {
   syncBatchExpenses,
   getSystemStats,
   getDeletedExpenseIds,
+  isMasterPasswordSet,
+  setMasterPassword,
+  verifyMasterPassword,
+  createAuthSession,
+  validateAuthSession,
+  revokeAuthSession,
+  checkRateLimit,
+  recordFailedAttempt,
+  resetFailedAttempts,
 } from './db.mjs';
 
 async function readBody(req) {
@@ -46,12 +55,31 @@ function sendJson(res, statusCode, obj) {
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-workspace-id, x-database-url, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-workspace-id, x-database-url, Authorization, x-session-token');
   if (typeof res.status === 'function' && typeof res.json === 'function') {
     res.status(statusCode).json(obj);
   } else {
     res.end(JSON.stringify(obj));
   }
+}
+
+function extractSessionToken(req, urlObj) {
+  const authHeader = (req.headers && req.headers['authorization']) || '';
+  if (authHeader.startsWith('Bearer ')) {
+    return authHeader.substring(7).trim();
+  }
+  if (req.headers && req.headers['x-session-token']) {
+    return String(req.headers['x-session-token']).trim();
+  }
+  return urlObj.searchParams.get('token') || (req.query && req.query.token) || null;
+}
+
+function getClientIp(req) {
+  const forwarded = req.headers && req.headers['x-forwarded-for'];
+  if (forwarded) {
+    return String(forwarded).split(',')[0].trim();
+  }
+  return req.socket?.remoteAddress || 'default_ip';
 }
 
 export async function handleApiRequest(req, res) {
@@ -62,7 +90,7 @@ export async function handleApiRequest(req, res) {
     res.statusCode = 204;
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-workspace-id, x-database-url, Authorization');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-workspace-id, x-database-url, Authorization, x-session-token');
     res.end();
     return true;
   }
@@ -99,6 +127,121 @@ export async function handleApiRequest(req, res) {
     undefined;
 
   try {
+    // -------------------------------------------------------------
+    // Public Auth Endpoints (Status, Setup, Login, Logout)
+    // -------------------------------------------------------------
+
+    // Check system password status
+    if (pathname === '/api/auth/status' && method === 'GET') {
+      const isPasswordSet = await isMasterPasswordSet(customUrl);
+      const token = extractSessionToken(req, urlObj);
+      const authenticated = isPasswordSet ? await validateAuthSession(token, customUrl) : false;
+      sendJson(res, 200, {
+        isPasswordSet,
+        authenticated,
+        locked: isPasswordSet && !authenticated,
+      });
+      return true;
+    }
+
+    // Set Master Access Password (First-Time Permanent Setup Only)
+    if (pathname === '/api/auth/setup' && method === 'POST') {
+      const isPasswordSet = await isMasterPasswordSet(customUrl);
+      if (isPasswordSet) {
+        sendJson(res, 403, {
+          error: 'Master password has already been set and is permanent. It cannot be changed or reset.',
+        });
+        return true;
+      }
+
+      const body = await readBody(req);
+      if (!body.password || typeof body.password !== 'string' || body.password.length < 6) {
+        sendJson(res, 400, { error: 'Master password must be at least 6 characters long.' });
+        return true;
+      }
+
+      await setMasterPassword(body.password, customUrl);
+      // Automatically log the creator in with a session token
+      const session = await createAuthSession(customUrl);
+      sendJson(res, 201, {
+        success: true,
+        message: 'Master password set permanently. Access is now strictly restricted.',
+        token: session.token,
+        expiresAt: session.expiresAt,
+      });
+      return true;
+    }
+
+    // Unlock / Login with Master Password
+    if (pathname === '/api/auth/login' && method === 'POST') {
+      const isPasswordSet = await isMasterPasswordSet(customUrl);
+      if (!isPasswordSet) {
+        sendJson(res, 400, { error: 'Master password has not been configured yet. Please complete setup.' });
+        return true;
+      }
+
+      const clientIp = getClientIp(req);
+      const rateStatus = await checkRateLimit(clientIp, customUrl);
+      if (!rateStatus.allowed) {
+        sendJson(res, 429, {
+          error: `Too many failed attempts. Access is temporarily locked. Please wait ${rateStatus.cooldownSeconds} seconds.`,
+          cooldownSeconds: rateStatus.cooldownSeconds,
+        });
+        return true;
+      }
+
+      const body = await readBody(req);
+      const valid = await verifyMasterPassword(body.password, customUrl);
+
+      if (!valid) {
+        const failedResult = await recordFailedAttempt(clientIp, customUrl);
+        const remaining = Math.max(0, 5 - failedResult.attempts);
+        sendJson(res, 401, {
+          error: failedResult.isLocked
+            ? 'Too many failed attempts. Temporary 60-second cooldown active.'
+            : `Incorrect master password. ${remaining} attempt(s) remaining before temporary lockout.`,
+          cooldownSeconds: failedResult.cooldownSeconds,
+        });
+        return true;
+      }
+
+      await resetFailedAttempts(clientIp, customUrl);
+      const session = await createAuthSession(customUrl);
+      sendJson(res, 200, {
+        success: true,
+        token: session.token,
+        expiresAt: session.expiresAt,
+      });
+      return true;
+    }
+
+    // Lock / Logout session
+    if (pathname === '/api/auth/logout' && method === 'POST') {
+      const token = extractSessionToken(req, urlObj);
+      if (token) {
+        await revokeAuthSession(token, customUrl);
+      }
+      sendJson(res, 200, { success: true, message: 'Expense tracker locked.' });
+      return true;
+    }
+
+    // -------------------------------------------------------------
+    // STRICT ACCESS GATEWAY FOR ALL DATA ENDPOINTS
+    // -------------------------------------------------------------
+    const passwordSet = await isMasterPasswordSet(customUrl);
+    if (passwordSet) {
+      const token = extractSessionToken(req, urlObj);
+      const isSessionValid = await validateAuthSession(token, customUrl);
+      if (!isSessionValid) {
+        sendJson(res, 401, {
+          error: 'Restricted Access: Valid master password session required.',
+          locked: true,
+          isPasswordSet: true,
+        });
+        return true;
+      }
+    }
+
     // 1. System Health & Storage Stats
     if (pathname === '/api/status' && method === 'GET') {
       const stats = await getSystemStats(workspaceId, customUrl);
