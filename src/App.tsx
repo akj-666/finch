@@ -8,6 +8,8 @@ import { ExpenseModal, ReceiptAttachmentData } from './components/ExpenseModal';
 import { DeleteConfirmModal } from './components/DeleteConfirmModal';
 import { BackupModal } from './components/BackupModal';
 import { ReceiptViewerModal } from './components/ReceiptViewerModal';
+import { NoticeModal } from './components/NoticeModal';
+import { SplashScreen } from './components/SplashScreen';
 import {
   Expense,
   FilterState,
@@ -30,11 +32,14 @@ import {
   syncBatchToSystem,
   SystemStats,
 } from './utils/apiSync';
-import { CheckCircle2, Plus, MapPin, HardDrive } from 'lucide-react';
+import { CheckCircle2, AlertCircle, X, Plus, MapPin, HardDrive } from 'lucide-react';
 import finchIconPng from './assets/finch-icon.png';
 import finchIconLightPng from './assets/finch-icon-light.png';
 
 export const App: React.FC = () => {
+  // Mobile Splash screen state
+  const [showSplash, setShowSplash] = useState(true);
+
   // Primary expenses state
   const [expenses, setExpenses] = useState<Expense[]>(() => loadExpenses());
 
@@ -62,17 +67,35 @@ export const App: React.FC = () => {
   const [deletingExpense, setDeletingExpense] = useState<Expense | null>(null);
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
 
+  // In-App Notice/Alert Modal (replaces browser alert dialog)
+  const [noticeModal, setNoticeModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    primaryActionLabel?: string;
+    onPrimaryAction?: () => void;
+    secondaryActionLabel?: string;
+    icon?: 'alert' | 'info' | 'finch';
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+  });
+
   // Receipt viewer state
   const [viewingReceiptExpense, setViewingReceiptExpense] = useState<Expense | null>(null);
   const [viewingReceiptUrl, setViewingReceiptUrl] = useState<string | null>(null);
 
-  // Transient Toast Notification
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  // Polished in-app feedback toast
+  const [toast, setToast] = useState<{
+    message: string;
+    type: 'success' | 'error' | 'info';
+  } | null>(null);
 
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToast({ message, type });
     setTimeout(() => {
-      setToastMessage(null);
+      setToast(null);
     }, 3500);
   };
 
@@ -328,13 +351,48 @@ export const App: React.FC = () => {
   };
 
   const handleDownloadPDF = () => {
-    generateExpensePDF(
+    if (filteredExpenses.length === 0) {
+      setNoticeModal({
+        isOpen: true,
+        title: 'Unable to Generate Report',
+        message:
+          'No expenses match the currently selected filters. Adjust your date range or filters to include records before generating a report.',
+        primaryActionLabel: 'Reset Filters',
+        onPrimaryAction: () => {
+          handleResetFilters();
+          showToast('Filters cleared — all expenses now visible.', 'info');
+        },
+        secondaryActionLabel: 'Dismiss',
+        icon: 'finch',
+      });
+      return;
+    }
+
+    const success = generateExpensePDF(
       filteredExpenses,
       filters.startDate,
       filters.endDate,
       filters.category,
-      filters.nature
+      filters.nature,
+      (errMsg) => {
+        setNoticeModal({
+          isOpen: true,
+          title: 'Unable to Generate Report',
+          message: errMsg,
+          primaryActionLabel: 'Reset Filters',
+          onPrimaryAction: () => {
+            handleResetFilters();
+            showToast('Filters cleared — all expenses now visible.', 'info');
+          },
+          secondaryActionLabel: 'Dismiss',
+          icon: 'finch',
+        });
+      }
     );
+
+    if (success) {
+      showToast('PDF expense report downloaded successfully.', 'success');
+    }
   };
 
   const isFiltered =
@@ -488,6 +546,7 @@ export const App: React.FC = () => {
         onClose={() => setIsBackupModalOpen(false)}
         expenses={expenses}
         onImportExpenses={handleImportExpenses}
+        onNotify={(msg) => showToast(msg, 'success')}
       />
 
       <ReceiptViewerModal
@@ -500,12 +559,51 @@ export const App: React.FC = () => {
         expense={viewingReceiptExpense}
       />
 
-      {/* Toast Notification */}
-      {toastMessage && (
-        <div className="fixed bottom-5 right-5 z-50 bg-[#0F3B2E] text-[#FFF8EE] px-4 py-2.5 rounded-xl shadow-xl border border-[#C89B3C]/40 flex items-center space-x-2.5 animate-in slide-in-from-bottom duration-200">
-          <CheckCircle2 className="w-4 h-4 text-[#C89B3C]" />
-          <span className="text-xs font-semibold">{toastMessage}</span>
+      <NoticeModal
+        isOpen={noticeModal.isOpen}
+        onClose={() => setNoticeModal((prev) => ({ ...prev, isOpen: false }))}
+        title={noticeModal.title}
+        message={noticeModal.message}
+        primaryActionLabel={noticeModal.primaryActionLabel}
+        onPrimaryAction={noticeModal.onPrimaryAction}
+        secondaryActionLabel={noticeModal.secondaryActionLabel}
+        icon={noticeModal.icon}
+      />
+
+      {/* Small, polished in-app messages */}
+      {toast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-5 left-4 right-4 sm:left-auto sm:right-6 sm:w-auto max-w-sm z-50 bg-[#0F3B2E] text-[#FFF8EE] px-4 py-3 rounded-xl shadow-2xl border border-[#C89B3C]/50 flex items-center justify-between gap-3 animate-in slide-in-from-bottom duration-200"
+          style={{ marginBottom: 'env(safe-area-inset-bottom, 0px)' }}
+        >
+          <div className="flex items-center space-x-2.5 min-w-0">
+            {toast.type === 'error' ? (
+              <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0" />
+            ) : (
+              <CheckCircle2 className="w-4 h-4 text-[#C89B3C] flex-shrink-0" />
+            )}
+            <span className="text-xs font-semibold leading-snug truncate">
+              {toast.message}
+            </span>
+          </div>
+          <button
+            onClick={() => setToast(null)}
+            className="text-[#d8cfbe] hover:text-white p-0.5 rounded cursor-pointer"
+            aria-label="Dismiss notification"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
+      )}
+
+      {/* Mobile-first branded Finch splash screen */}
+      {showSplash && (
+        <SplashScreen
+          onComplete={() => setShowSplash(false)}
+          minDuration={1100}
+        />
       )}
     </div>
   );

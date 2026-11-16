@@ -26,6 +26,7 @@ interface BackupModalProps {
   onClose: () => void;
   expenses: Expense[];
   onImportExpenses: (importedExpenses: Expense[], mode: 'replace' | 'merge') => void;
+  onNotify?: (message: string) => void;
 }
 
 export const BackupModal: React.FC<BackupModalProps> = ({
@@ -33,6 +34,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
   onClose,
   expenses,
   onImportExpenses,
+  onNotify,
 }) => {
   const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge');
   const [importStatus, setImportStatus] = useState<{
@@ -43,15 +45,26 @@ export const BackupModal: React.FC<BackupModalProps> = ({
 
   const [systemStats, setSystemStats] = useState<SystemStats | null>(null);
   const [isSyncingToSystem, setIsSyncingToSystem] = useState(false);
-  const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+  const [syncFeedback, setSyncFeedback] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (isOpen) {
       getSystemHealth().then((stats) => setSystemStats(stats));
+
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          onClose();
+        }
+      };
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
     }
-  }, [isOpen]);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -59,16 +72,25 @@ export const BackupModal: React.FC<BackupModalProps> = ({
     setIsSyncingToSystem(true);
     setSyncFeedback(null);
     try {
-      const ok = await syncBatchToSystem(expenses);
-      if (ok) {
+      const result = await syncBatchToSystem(expenses);
+      if (result.ok) {
         const updated = await getSystemHealth();
         setSystemStats(updated);
-        setSyncFeedback(`Successfully synced ${expenses.length} records to local host system!`);
+        setSyncFeedback({
+          type: 'success',
+          message: result.message,
+        });
       } else {
-        setSyncFeedback('Sync failed. Please check local server.');
+        setSyncFeedback({
+          type: 'error',
+          message: result.message,
+        });
       }
     } catch (err) {
-      setSyncFeedback('Could not connect to local system API.');
+      setSyncFeedback({
+        type: 'error',
+        message: 'Could not connect to local system API. Make sure the Finch server is running.',
+      });
     } finally {
       setIsSyncingToSystem(false);
     }
@@ -154,8 +176,14 @@ export const BackupModal: React.FC<BackupModalProps> = ({
                   System Database & Disk Storage
                 </h3>
               </div>
-              <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
-                ● {systemStats?.status === 'connected' ? 'Active' : 'Offline Cache'}
+              <span
+                className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold border ${
+                  systemStats?.status === 'connected'
+                    ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                    : 'bg-amber-100 text-amber-800 border-amber-300'
+                }`}
+              >
+                ● {systemStats?.status === 'connected' ? 'Active & Connected' : 'Offline Cache (Browser)'}
               </span>
             </div>
 
@@ -203,8 +231,19 @@ export const BackupModal: React.FC<BackupModalProps> = ({
             </div>
 
             {syncFeedback && (
-              <div className="text-[11px] text-emerald-800 font-semibold bg-emerald-50 p-2 rounded border border-emerald-200">
-                {syncFeedback}
+              <div
+                className={`text-[11px] font-semibold p-2.5 rounded-lg border flex items-start gap-2 ${
+                  syncFeedback.type === 'success'
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                    : 'bg-red-50 text-red-800 border-red-200'
+                }`}
+              >
+                {syncFeedback.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+                )}
+                <span>{syncFeedback.message}</span>
               </div>
             )}
           </div>
@@ -222,7 +261,10 @@ export const BackupModal: React.FC<BackupModalProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {/* Export JSON */}
               <button
-                onClick={() => exportToJSON(expenses)}
+                onClick={() => {
+                  exportToJSON(expenses);
+                  onNotify?.(`Exported JSON backup file (${expenses.length} records).`);
+                }}
                 className="flex items-center justify-between p-3.5 rounded-xl border border-[#d9cfbe] bg-[#FAF7F0] hover:bg-[#f2ecdf] hover:border-[#0F3B2E] transition-all group text-left cursor-pointer"
               >
                 <div className="flex items-center space-x-3">
@@ -239,7 +281,10 @@ export const BackupModal: React.FC<BackupModalProps> = ({
 
               {/* Export CSV */}
               <button
-                onClick={() => exportToCSV(expenses)}
+                onClick={() => {
+                  exportToCSV(expenses);
+                  onNotify?.(`Exported CSV spreadsheet (${expenses.length} records).`);
+                }}
                 className="flex items-center justify-between p-3.5 rounded-xl border border-[#d9cfbe] bg-[#FAF7F0] hover:bg-[#f2ecdf] hover:border-[#0F3B2E] transition-all group text-left cursor-pointer"
               >
                 <div className="flex items-center space-x-3">

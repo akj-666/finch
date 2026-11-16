@@ -145,19 +145,19 @@ export function saveExpense(exp) {
   `);
 
   stmt.run({
-    id: exp.id,
-    date: exp.date,
-    amount: exp.amount,
-    category: exp.category,
-    nature: exp.nature,
-    description: exp.description,
-    kiosk_tag: exp.kioskTag || null,
-    payment_mode: exp.paymentMode,
-    notes: exp.notes || null,
+    id: String(exp.id || `exp-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`),
+    date: String(exp.date || now.split('T')[0]),
+    amount: typeof exp.amount === 'number' && !isNaN(exp.amount) ? exp.amount : (Number(exp.amount) || 0),
+    category: String(exp.category || 'Other Expenses'),
+    nature: exp.nature === 'CapEx' || exp.nature === 'OpEx' ? exp.nature : 'OpEx',
+    description: String(exp.description || 'Expense entry'),
+    kiosk_tag: exp.kioskTag || exp.kiosk_tag || null,
+    payment_mode: String(exp.paymentMode || exp.payment_mode || 'Cash'),
+    notes: exp.notes ? String(exp.notes) : null,
     has_receipt: exp.hasReceipt ? 1 : 0,
-    receipt_name: exp.receiptName || null,
-    receipt_size: exp.receiptSize || null,
-    created_at: exp.createdAt || now,
+    receipt_name: exp.receiptName || exp.receipt_name || null,
+    receipt_size: typeof exp.receiptSize === 'number' ? exp.receiptSize : (typeof exp.receipt_size === 'number' ? exp.receipt_size : null),
+    created_at: String(exp.createdAt || exp.created_at || now),
     updated_at: now,
   });
 

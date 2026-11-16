@@ -112,19 +112,44 @@ export async function deleteReceiptFromSystem(expenseId: string): Promise<boolea
   }
 }
 
+export interface SyncResult {
+  ok: boolean;
+  message: string;
+  count?: number;
+}
+
 /**
  * Bulk sync a list of expenses to the local SQLite database
  */
-export async function syncBatchToSystem(expenses: Expense[]): Promise<boolean> {
+export async function syncBatchToSystem(expenses: Expense[]): Promise<SyncResult> {
   try {
     const res = await fetch(`${API_BASE}/sync`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ expenses }),
     });
-    return res.ok;
+
+    if (res.ok) {
+      const data = await res.json().catch(() => ({}));
+      const count = typeof data.syncedCount === 'number' ? data.syncedCount : expenses.length;
+      return {
+        ok: true,
+        count,
+        message: `Successfully synced ${count} record${count === 1 ? '' : 's'} to local SQLite!`,
+      };
+    }
+
+    const errData = await res.json().catch(() => null);
+    const detail = errData?.error ? ` (${errData.error})` : '';
+    return {
+      ok: false,
+      message: `Sync failed: Server returned HTTP ${res.status}${detail}.`,
+    };
   } catch (err) {
-    console.warn('Bulk system sync failed:', err);
-    return false;
+    const detail = err instanceof Error ? err.message : 'Connection failed';
+    return {
+      ok: false,
+      message: `Cannot connect to local Finch backend (${detail}). Ensure the local server is running with 'npm run dev'.`,
+    };
   }
 }

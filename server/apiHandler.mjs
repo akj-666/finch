@@ -134,13 +134,19 @@ export async function handleApiRequest(req, res) {
       const body = await readBody(req);
       const items = Array.isArray(body.expenses) ? body.expenses : [];
       let savedCount = 0;
+      const errors = [];
       for (const item of items) {
-        if (item && item.id && item.description) {
-          saveExpense(item);
-          savedCount++;
+        if (item && (item.id || item.description)) {
+          try {
+            saveExpense(item);
+            savedCount++;
+          } catch (itemErr) {
+            console.error('Failed to sync item:', item, itemErr);
+            errors.push(itemErr.message);
+          }
         }
       }
-      sendJson(res, 200, { success: true, syncedCount: savedCount });
+      sendJson(res, 200, { success: true, syncedCount: savedCount, errors });
       return true;
     }
 

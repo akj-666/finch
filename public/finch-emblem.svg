@@ -1,0 +1,16 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='310 800 460 410'>
+  <defs>
+    <filter id='shadow' x='-30%' y='-30%' width='160%' height='170%'>
+      <feDropShadow dx='0' dy='24' stdDeviation='28' flood-color='#0f3b2e' flood-opacity='.13'/>
+    </filter>
+  </defs>
+  <g filter='url(#shadow)'>
+    <circle cx='540' cy='1000' r='174' fill='#0f3b2e'/>
+    <circle cx='540' cy='1000' r='150' fill='none' stroke='#c89b3c' stroke-opacity='.52' stroke-width='2'/>
+    <path d='M570 883c-77 0-137 57-137 137 0 61 33 108 86 130-14 20-33 37-61 49 47 12 96-1 130-34 75-6 129-63 129-139 0-80-63-143-147-143Z' fill='#fff8ee'/>
+    <path d='M476 1032c29-40 70-61 122-59-20 14-33 33-38 58 27-13 57-16 89-8-27 36-67 58-115 62-26-12-46-30-58-53Z' fill='#0f3b2e'/>
+    <circle cx='611' cy='966' r='11' fill='#c89b3c'/>
+    <path d='m684 968 69 22-69 22c7-14 7-30 0-44Z' fill='#c89b3c'/>
+    <path d='M401 1129c-28 8-50 25-65 49 33-5 62-18 85-41l-20-8Z' fill='#c89b3c'/>
+  </g>
+</svg>

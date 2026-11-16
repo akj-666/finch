@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 2400" role="img" aria-labelledby="title desc">
+  <title id="title">Finch mobile splash screen</title>
+  <desc id="desc">A warm ivory Finch app launch screen with a forest green bird mark, gold details, and a subtle loading indicator.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fffaf2"/>
+      <stop offset="1" stop-color="#fff8ee"/>
+    </linearGradient>
+    <radialGradient id="glow">
+      <stop offset="0" stop-color="#e5eee7" stop-opacity=".95"/>
+      <stop offset="1" stop-color="#e5eee7" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="24" stdDeviation="28" flood-color="#0f3b2e" flood-opacity=".13"/>
+    </filter>
+  </defs>
+  <rect width="1080" height="2400" fill="url(#bg)"/>
+  <path d="M0 0h1080v108H0zM0 2310h1080v90H0z" fill="#0f3b2e"/>
+  <!-- Soft color field keeps the center calm while giving the mark presence. -->
+  <circle cx="540" cy="1060" r="440" fill="url(#glow)"/>
+
+  <!-- Compact status area for a native-app style preview. -->
+  <g fill="#fff8ee" font-family="Arial, sans-serif" font-size="29" font-weight="600">
+    <text x="62" y="76">9:41</text>
+    <path d="M876 58h10v20h-10zM891 51h10v27h-10zM906 45h10v33h-10z" opacity=".92"/>
+    <path d="M935 56h33a5 5 0 0 1 5 5v17h-43V61a5 5 0 0 1 5-5Zm2 5v12h29V61Z" fill-rule="evenodd"/>
+    <rect x="976" y="62" width="4" height="10" rx="2"/>
+  </g>
+
+  <!-- Finch mark: simple, crisp bird silhouette in the established palette. -->
+  <g filter="url(#shadow)">
+    <circle cx="540" cy="1000" r="174" fill="#0f3b2e"/>
+    <circle cx="540" cy="1000" r="150" fill="none" stroke="#c89b3c" stroke-opacity=".52" stroke-width="2"/>
+    <path d="M570 883c-77 0-137 57-137 137 0 61 33 108 86 130-14 20-33 37-61 49 47 12 96-1 130-34 75-6 129-63 129-139 0-80-63-143-147-143Z" fill="#fff8ee"/>
+    <path d="M476 1032c29-40 70-61 122-59-20 14-33 33-38 58 27-13 57-16 89-8-27 36-67 58-115 62-26-12-46-30-58-53Z" fill="#0f3b2e"/>
+    <circle cx="611" cy="966" r="11" fill="#c89b3c"/>
+    <path d="m684 968 69 22-69 22c7-14 7-30 0-44Z" fill="#c89b3c"/>
+    <path d="M401 1129c-28 8-50 25-65 49 33-5 62-18 85-41l-20-8Z" fill="#c89b3c"/>
+  </g>
+
+  <text x="540" y="1290" text-anchor="middle" fill="#0f3b2e" font-family="Avenir Next, Avenir, Montserrat, Arial, sans-serif" font-size="93" font-weight="650" letter-spacing="-2.5">finch</text>
+  <text x="540" y="1352" text-anchor="middle" fill="#63736a" font-family="Avenir Next, Avenir, Arial, sans-serif" font-size="27" letter-spacing=".2">A clearer view of every rupee.</text>
+
+  <!-- Minimal loading indicator -->
+  <rect x="425" y="1454" width="230" height="5" rx="3" fill="#e7e9df"/>
+  <rect x="425" y="1454" width="82" height="5" rx="3" fill="#c89b3c"/>
+  <text x="540" y="1500" text-anchor="middle" fill="#88938c" font-family="Avenir Next, Avenir, Arial, sans-serif" font-size="18" letter-spacing=".5">GETTING THINGS READY</text>
+
+  <text x="540" y="2260" text-anchor="middle" fill="#87928b" font-family="Avenir Next, Avenir, Arial, sans-serif" font-size="18" letter-spacing="1.2">KOTTAYAM · KERALA</text>
+  <rect x="427" y="2353" width="226" height="7" rx="4" fill="#fff8ee" opacity=".85"/>
+</svg>

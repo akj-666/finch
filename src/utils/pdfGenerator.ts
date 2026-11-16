@@ -18,11 +18,14 @@ export function generateExpensePDF(
   startDate: string,
   endDate: string,
   categoryFilter?: string,
-  natureFilter?: string
-): void {
+  natureFilter?: string,
+  onError?: (message: string) => void
+): boolean {
   if (expenses.length === 0) {
-    alert('Cannot generate report: No expenses match the currently selected filters.');
-    return;
+    if (onError) {
+      onError('No expenses match the currently selected filters. Adjust your date range or filters to include records before generating a report.');
+    }
+    return false;
   }
 
   const doc = new jsPDF({
@@ -313,4 +316,5 @@ export function generateExpensePDF(
   // Generate safe filename
   const cleanTimeline = timelineLabel.replace(/[\s–/]+/g, '-').toLowerCase();
   doc.save(`finch-expenses-${cleanTimeline}.pdf`);
+  return true;
 }
