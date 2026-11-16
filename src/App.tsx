@@ -24,13 +24,19 @@ import { formatTimeline } from './utils/formatters';
 import { saveReceipt, deleteReceipt, getReceipt } from './utils/receiptStorage';
 import {
   getSystemHealth,
-  fetchSystemExpenses,
   saveExpenseToSystem,
   deleteExpenseFromSystem,
   saveReceiptToSystem,
   deleteReceiptFromSystem,
   syncBatchToSystem,
   SystemStats,
+  initWorkspaceFromUrl,
+  getWorkspaceId,
+  performFullSync,
+  subscribeSyncStatus,
+  SyncStatusInfo,
+  getSyncStatus,
+  getCustomDbUrl,
 } from './utils/apiSync';
 import { CheckCircle2, AlertCircle, X, Plus, MapPin, HardDrive } from 'lucide-react';
 import finchIconPng from './assets/finch-icon.png';
@@ -43,7 +49,11 @@ export const App: React.FC = () => {
   // Primary expenses state
   const [expenses, setExpenses] = useState<Expense[]>(() => loadExpenses());
 
-  // Local System Backend health & sync status
+  // Workspace and live sync status
+  const [workspaceId, setWorkspaceIdState] = useState<string>(() => initWorkspaceFromUrl());
+  const [syncInfo, setSyncInfo] = useState<SyncStatusInfo>(() => getSyncStatus());
+
+  // Backend health & sync stats
   const [systemStats, setSystemStats] = useState<SystemStats | null>(null);
 
   // Filter state
@@ -99,7 +109,16 @@ export const App: React.FC = () => {
     }, 3500);
   };
 
-  // 1. Initial Connection with Local Machine Backend System
+  // 1. Live Sync Status Subscription
+  useEffect(() => {
+    const unsubscribe = subscribeSyncStatus((info) => {
+      setSyncInfo(info);
+      setWorkspaceIdState(getWorkspaceId());
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // 2. Initial Cross-Device Sync & Workspace Reconciliation
   useEffect(() => {
     let isMounted = true;
     (async () => {
@@ -107,19 +126,12 @@ export const App: React.FC = () => {
       if (!isMounted) return;
       setSystemStats(health);
 
-      if (health.status === 'connected') {
-        const remoteList = await fetchSystemExpenses();
-        if (!isMounted) return;
+      // Perform intelligent two-way sync: preserves all records from phone and laptop
+      const syncResult = await performFullSync(expenses);
+      if (!isMounted) return;
 
-        if (remoteList && remoteList.length > 0) {
-          // If system database has data, load it as source of truth
-          setExpenses(remoteList);
-        } else {
-          // If system database is fresh/empty, seed it with current expenses
-          await syncBatchToSystem(expenses);
-          const updated = await getSystemHealth();
-          if (isMounted) setSystemStats(updated);
-        }
+      if (syncResult.success && syncResult.mergedExpenses) {
+        setExpenses(syncResult.mergedExpenses);
       }
     })();
 
@@ -128,7 +140,7 @@ export const App: React.FC = () => {
     };
   }, []);
 
-  // 2. Sync with browser localStorage as reliable local cache
+  // 3. Sync with browser localStorage as reliable local cache
   useEffect(() => {
     saveExpenses(expenses);
   }, [expenses]);
@@ -291,10 +303,16 @@ export const App: React.FC = () => {
       updatedAt: now,
     };
 
-    // 3. Persist directly to host machine SQLite and filesystem
+    // 3. Persist directly to shared workspace (handles online/offline seamlessly)
     await saveExpenseToSystem(updatedRecord);
     if (receiptData) {
-      await saveReceiptToSystem(targetId, receiptData.dataUrl, receiptData.name);
+      await saveReceiptToSystem(
+        targetId,
+        receiptData.dataUrl,
+        receiptData.name,
+        receiptData.size,
+        receiptData.type
+      );
     } else if (receiptData === null) {
       await deleteReceiptFromSystem(targetId);
     }
@@ -302,10 +320,10 @@ export const App: React.FC = () => {
     // 4. Update UI State
     if (editId) {
       setExpenses((prev) => prev.map((item) => (item.id === editId ? updatedRecord : item)));
-      showToast('Expense updated & saved to system disk.');
+      showToast('Expense updated & synced across devices.');
     } else {
       setExpenses((prev) => [updatedRecord, ...prev]);
-      showToast('New expense recorded to system database.');
+      showToast('New expense recorded & synced across devices.');
     }
 
     setEditingExpense(null);
@@ -314,17 +332,65 @@ export const App: React.FC = () => {
   const handleConfirmDelete = async () => {
     if (!deletingExpense) return;
 
-    // Delete from IndexedDB and local system database
+    // Delete from IndexedDB and shared cloud workspace
     await deleteReceipt(deletingExpense.id);
     await deleteExpenseFromSystem(deletingExpense.id);
+    await deleteReceiptFromSystem(deletingExpense.id);
 
     setExpenses((prev) => prev.filter((e) => e.id !== deletingExpense.id));
-    showToast(`Deleted "${deletingExpense.description}" from system.`);
+    showToast(`Deleted "${deletingExpense.description}".`);
     setDeletingExpense(null);
   };
 
+  const handleRetrySync = async () => {
+    showToast('Connecting and synchronizing with workspace...', 'info');
+    const result = await performFullSync(expenses);
+    const health = await getSystemHealth();
+    setSystemStats(health);
+    if (result.success) {
+      if (result.mergedExpenses) {
+        setExpenses(result.mergedExpenses);
+      }
+      showToast(result.message, 'success');
+    } else {
+      showToast(result.message, 'error');
+    }
+  };
+
   const handleViewReceipt = async (expense: Expense) => {
-    const stored = await getReceipt(expense.id);
+    let stored = await getReceipt(expense.id);
+    if (!stored || !stored.dataUrl) {
+      // If not in local IndexedDB (e.g. created on another device), fetch from shared backend
+      try {
+        const customUrl = getCustomDbUrl();
+        const res = await fetch(`/api/receipts/${encodeURIComponent(expense.id)}`, {
+          headers: {
+            'x-workspace-id': getWorkspaceId(),
+            ...(customUrl ? { 'x-database-url': customUrl } : {}),
+          },
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json.receipt && json.receipt.dataUrl) {
+            const remoteReceipt = {
+              dataUrl: json.receipt.dataUrl,
+              name: json.receipt.name || 'receipt.jpg',
+              size: json.receipt.size || 0,
+              type: json.receipt.mimeType || 'image/jpeg',
+            };
+            await saveReceipt(expense.id, remoteReceipt);
+            stored = {
+              expenseId: expense.id,
+              ...remoteReceipt,
+              createdAt: new Date().toISOString(),
+            };
+          }
+        }
+      } catch (e) {
+        console.warn('Could not fetch remote receipt:', e);
+      }
+    }
+
     if (stored && stored.dataUrl) {
       setViewingReceiptExpense(expense);
       setViewingReceiptUrl(stored.dataUrl);
@@ -414,6 +480,9 @@ export const App: React.FC = () => {
         filteredSpend={summary.totalSpend}
         allExpenses={expenses}
         timelineLabel={timelineLabel}
+        syncInfo={syncInfo}
+        workspaceId={workspaceId}
+        onRetrySync={handleRetrySync}
       />
 
       {/* Main Content Area */}
@@ -546,6 +615,7 @@ export const App: React.FC = () => {
         onClose={() => setIsBackupModalOpen(false)}
         expenses={expenses}
         onImportExpenses={handleImportExpenses}
+        onExpensesUpdated={(newExpenses) => setExpenses(newExpenses)}
         onNotify={(msg) => showToast(msg, 'success')}
       />
 

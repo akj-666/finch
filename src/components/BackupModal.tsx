@@ -10,7 +10,11 @@ import {
   RefreshCw,
   HardDrive,
   Database,
-  FolderOpen,
+  Smartphone,
+  Copy,
+  Check,
+  Globe,
+  Settings2,
 } from 'lucide-react';
 import { Expense } from '../types';
 import {
@@ -18,7 +22,18 @@ import {
   exportToCSV,
   parseAndValidateImportJSON,
 } from '../utils/storage';
-import { getSystemHealth, syncBatchToSystem, SystemStats } from '../utils/apiSync';
+import {
+  getSystemHealth,
+  performFullSync,
+  SystemStats,
+  getWorkspaceId,
+  setWorkspaceId,
+  getWorkspaceShareUrl,
+  getCustomDbUrl,
+  setCustomDbUrl,
+  getSyncStatus,
+  SyncStatusInfo,
+} from '../utils/apiSync';
 import finchIconLightPng from '../assets/finch-icon-light.png';
 
 interface BackupModalProps {
@@ -26,6 +41,7 @@ interface BackupModalProps {
   onClose: () => void;
   expenses: Expense[];
   onImportExpenses: (importedExpenses: Expense[], mode: 'replace' | 'merge') => void;
+  onExpensesUpdated?: (newExpenses: Expense[]) => void;
   onNotify?: (message: string) => void;
 }
 
@@ -34,6 +50,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
   onClose,
   expenses,
   onImportExpenses,
+  onExpensesUpdated,
   onNotify,
 }) => {
   const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge');
@@ -44,16 +61,32 @@ export const BackupModal: React.FC<BackupModalProps> = ({
   }>({ type: 'idle', message: '' });
 
   const [systemStats, setSystemStats] = useState<SystemStats | null>(null);
-  const [isSyncingToSystem, setIsSyncingToSystem] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<{
     type: 'success' | 'error';
     message: string;
   } | null>(null);
 
+  // Workspace and connection management
+  const [currentWorkspace, setCurrentWorkspace] = useState(getWorkspaceId());
+  const [workspaceInput, setWorkspaceInput] = useState(getWorkspaceId());
+  const [copiedLink, setCopiedLink] = useState(false);
+
+  // Advanced custom DB config
+  const [showAdvancedDb, setShowAdvancedDb] = useState(false);
+  const [customDbUrl, setCustomDbInput] = useState(getCustomDbUrl());
+  const [savedDbUrlFeedback, setSavedDbUrlFeedback] = useState(false);
+
+  const [syncInfo, setSyncInfo] = useState<SyncStatusInfo>(getSyncStatus());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (isOpen) {
+      setCurrentWorkspace(getWorkspaceId());
+      setWorkspaceInput(getWorkspaceId());
+      setCustomDbInput(getCustomDbUrl());
+      setSyncInfo(getSyncStatus());
+
       getSystemHealth().then((stats) => setSystemStats(stats));
 
       const handleKeyDown = (e: KeyboardEvent) => {
@@ -68,18 +101,24 @@ export const BackupModal: React.FC<BackupModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSyncToSystemDisk = async () => {
-    setIsSyncingToSystem(true);
+  const handleFullSync = async () => {
+    setIsSyncing(true);
     setSyncFeedback(null);
     try {
-      const result = await syncBatchToSystem(expenses);
-      if (result.ok) {
-        const updated = await getSystemHealth();
-        setSystemStats(updated);
+      const result = await performFullSync(expenses);
+      const updated = await getSystemHealth();
+      setSystemStats(updated);
+      setSyncInfo(getSyncStatus());
+
+      if (result.success) {
+        if (onExpensesUpdated && result.mergedExpenses) {
+          onExpensesUpdated(result.mergedExpenses);
+        }
         setSyncFeedback({
           type: 'success',
           message: result.message,
         });
+        onNotify?.(result.message);
       } else {
         setSyncFeedback({
           type: 'error',
@@ -89,11 +128,72 @@ export const BackupModal: React.FC<BackupModalProps> = ({
     } catch (err) {
       setSyncFeedback({
         type: 'error',
-        message: 'Could not connect to local system API. Make sure the Finch server is running.',
+        message: 'Could not connect to Finch sync server. Changes remain safe in offline storage.',
       });
     } finally {
-      setIsSyncingToSystem(false);
+      setIsSyncing(false);
     }
+  };
+
+  const handleWorkspaceSwitch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const sanitized = workspaceInput.trim().toLowerCase();
+    if (!sanitized) return;
+
+    setWorkspaceId(sanitized);
+    setCurrentWorkspace(sanitized);
+    setSyncFeedback(null);
+    setIsSyncing(true);
+
+    try {
+      const result = await performFullSync(expenses);
+      const updated = await getSystemHealth();
+      setSystemStats(updated);
+      setSyncInfo(getSyncStatus());
+
+      if (onExpensesUpdated && result.mergedExpenses) {
+        onExpensesUpdated(result.mergedExpenses);
+      }
+      setSyncFeedback({
+        type: 'success',
+        message: `Switched to workspace "${sanitized}". Synchronized ${result.mergedExpenses?.length || 0} records.`,
+      });
+      onNotify?.(`Active workspace changed to ${sanitized}`);
+    } catch (err) {
+      setSyncFeedback({
+        type: 'error',
+        message: `Failed to load workspace "${sanitized}".`,
+      });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleCopyPhoneSyncLink = async () => {
+    const url = getWorkspaceShareUrl(currentWorkspace);
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2500);
+      onNotify?.('Phone sync link copied to clipboard!');
+    } catch (err) {
+      // Fallback for older browsers
+      const textArea = document.createElement('textarea');
+      textArea.value = url;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2500);
+    }
+  };
+
+  const handleSaveCustomDbUrl = async () => {
+    setCustomDbUrl(customDbUrl);
+    setSavedDbUrlFeedback(true);
+    setTimeout(() => setSavedDbUrlFeedback(false), 2000);
+    handleFullSync();
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -133,17 +233,10 @@ export const BackupModal: React.FC<BackupModalProps> = ({
     onClose();
   };
 
-  const formatBytes = (bytes?: number) => {
-    if (!bytes) return '0 KB';
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-  };
-
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200">
       <div
-        className="bg-white rounded-2xl max-w-xl w-full shadow-2xl border border-[#e5decb] overflow-hidden my-6 flex flex-col max-h-[85vh]"
+        className="bg-white rounded-2xl max-w-xl w-full shadow-2xl border border-[#e5decb] overflow-hidden my-6 flex flex-col max-h-[90vh]"
         role="dialog"
         aria-modal="true"
       >
@@ -152,9 +245,9 @@ export const BackupModal: React.FC<BackupModalProps> = ({
           <div className="flex items-center space-x-3">
             <img src={finchIconLightPng} alt="Finch" className="w-8 h-8 object-contain flex-shrink-0" />
             <div>
-              <h2 className="text-base font-bold">Data & Backup Management</h2>
+              <h2 className="text-base font-bold">Data, Cloud Sync & Backups</h2>
               <p className="text-xs text-[#d8cfbe]">
-                Secure offline persistence • {expenses.length} expenses on record
+                Shared Workspace: <span className="font-semibold text-[#C89B3C]">{currentWorkspace}</span> • {expenses.length} records
               </p>
             </div>
           </div>
@@ -167,66 +260,128 @@ export const BackupModal: React.FC<BackupModalProps> = ({
         </div>
 
         <div className="p-6 space-y-6 overflow-y-auto flex-1">
-          {/* Section 0: Host Computer System Storage (SQLite + Disk) */}
-          <div className="p-4 rounded-xl border border-[#C89B3C]/50 bg-[#FAF7F0] space-y-3">
+          {/* Section 0: Cross-Device Cloud Sync & Workspace */}
+          <div className="p-4 rounded-xl border border-[#C89B3C]/50 bg-[#FAF7F0] space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
-                <HardDrive className="w-4 h-4 text-[#0F3B2E]" />
+                <Globe className="w-4 h-4 text-[#0F3B2E]" />
                 <h3 className="text-xs font-bold text-[#0F3B2E] uppercase tracking-wider">
-                  System Database & Disk Storage
+                  Cross-Device Workspace Sync
                 </h3>
               </div>
               <span
                 className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold border ${
-                  systemStats?.status === 'connected'
+                  syncInfo.state === 'synced'
                     ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                    : 'bg-amber-100 text-amber-800 border-amber-300'
+                    : syncInfo.state === 'syncing'
+                    ? 'bg-amber-100 text-amber-800 border-amber-300'
+                    : syncInfo.state === 'offline'
+                    ? 'bg-zinc-100 text-zinc-800 border-zinc-300'
+                    : 'bg-rose-100 text-rose-800 border-rose-300'
                 }`}
               >
-                ● {systemStats?.status === 'connected' ? 'Active & Connected' : 'Offline Cache (Browser)'}
+                ● {syncInfo.state === 'synced' ? 'Synced with Cloud' : syncInfo.state === 'syncing' ? 'Syncing...' : syncInfo.state === 'offline' ? 'Offline Storage' : 'Sync Failed'}
               </span>
             </div>
 
+            {/* Link Generator for Phone & Laptop Sync */}
+            <div className="bg-white p-3 rounded-lg border border-[#e5decb] space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-[#0F3B2E]">
+                  <Smartphone className="w-4 h-4 text-[#C89B3C]" />
+                  <span>Phone & Laptop Sync Link</span>
+                </div>
+                <span className="text-[10px] text-gray-500">Same Workspace ID</span>
+              </div>
+              <p className="text-[11px] text-[#55695f]">
+                Open this exact link on your mobile phone Chrome app or laptop to sync expenses across all your devices:
+              </p>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={getWorkspaceShareUrl(currentWorkspace)}
+                  className="w-full text-xs bg-gray-50 border border-gray-200 rounded px-2.5 py-1.5 font-mono text-gray-700 select-all"
+                />
+                <button
+                  type="button"
+                  onClick={handleCopyPhoneSyncLink}
+                  className="px-3 py-1.5 rounded bg-[#0F3B2E] text-[#FFF8EE] text-xs font-semibold hover:bg-[#185241] transition-colors flex items-center gap-1 flex-shrink-0 cursor-pointer"
+                >
+                  {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-[#C89B3C]" />}
+                  <span>{copiedLink ? 'Copied' : 'Copy'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Workspace Switcher */}
+            <form onSubmit={handleWorkspaceSwitch} className="bg-white p-3 rounded-lg border border-[#e5decb] space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-[#0F3B2E]">Switch or Create Workspace</span>
+                <span className="text-[10px] text-gray-500">Partition by team or unit</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={workspaceInput}
+                  onChange={(e) => setWorkspaceInput(e.target.value)}
+                  placeholder="e.g. finch-kottayam or kottayam-kiosk"
+                  className="w-full text-xs border border-[#d9cfbe] rounded px-2.5 py-1.5 text-gray-800 focus:outline-none focus:border-[#0F3B2E]"
+                />
+                <button
+                  type="submit"
+                  disabled={isSyncing || workspaceInput.trim() === currentWorkspace}
+                  className="px-3 py-1.5 rounded bg-[#185241] text-[#FFF8EE] text-xs font-semibold hover:bg-[#206953] disabled:opacity-50 transition-colors flex-shrink-0 cursor-pointer"
+                >
+                  Switch
+                </button>
+              </div>
+            </form>
+
+            {/* Backend Engine & Storage Stats */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-[#42524a]">
               <div className="bg-white p-2.5 rounded-lg border border-[#e5decb] space-y-1">
                 <div className="flex items-center text-[#0F3B2E] font-bold gap-1.5">
                   <Database className="w-3.5 h-3.5 text-[#C89B3C]" />
-                  <span>SQLite Database</span>
+                  <span>Storage Engine</span>
                 </div>
-                <div className="font-mono text-[10px] text-gray-600 truncate" title="data/finch.db">
-                  data/finch.db
+                <div className="font-semibold text-[11px] text-[#0F3B2E] truncate">
+                  {systemStats?.engine || (systemStats?.status === 'connected' ? 'Multi-Device Cloud Database' : 'Local Device Cache')}
                 </div>
                 <div className="text-[10px] text-[#7e998e]">
-                  Size: {formatBytes(systemStats?.databaseSizeBytes)} • {systemStats?.totalExpensesCount ?? expenses.length} records
+                  Workspace: <span className="font-mono text-gray-700">{currentWorkspace}</span>
                 </div>
               </div>
 
               <div className="bg-white p-2.5 rounded-lg border border-[#e5decb] space-y-1">
                 <div className="flex items-center text-[#0F3B2E] font-bold gap-1.5">
-                  <FolderOpen className="w-3.5 h-3.5 text-[#C89B3C]" />
-                  <span>Receipts Folder</span>
+                  <HardDrive className="w-3.5 h-3.5 text-[#C89B3C]" />
+                  <span>Server Records</span>
                 </div>
-                <div className="font-mono text-[10px] text-gray-600 truncate" title="data/receipts/">
-                  data/receipts/
+                <div className="font-semibold text-[11px] text-[#0F3B2E]">
+                  {systemStats?.totalExpensesCount ?? expenses.length} expenses in cloud
                 </div>
                 <div className="text-[10px] text-[#7e998e]">
-                  Size: {formatBytes(systemStats?.totalReceiptsSizeBytes)} • {systemStats?.totalReceiptsCount ?? 0} files
+                  Local device cache: {expenses.length} records
                 </div>
               </div>
             </div>
 
+            {/* Sync Controls & Feedback */}
             <div className="pt-1 flex items-center justify-between">
               <span className="text-[10px] text-[#7e998e]">
-                All expenses and receipts are stored on disk with high reliability.
+                {syncInfo.pendingCount > 0
+                  ? `${syncInfo.pendingCount} offline change(s) waiting to sync`
+                  : 'All phone and laptop records are synchronized'}
               </span>
               <button
                 type="button"
-                onClick={handleSyncToSystemDisk}
-                disabled={isSyncingToSystem}
-                className="px-3 py-1.5 rounded-lg bg-[#0F3B2E] text-[#FFF8EE] text-[11px] font-bold hover:bg-[#185241] transition-all flex items-center gap-1.5 flex-shrink-0 cursor-pointer"
+                onClick={handleFullSync}
+                disabled={isSyncing}
+                className="px-3.5 py-1.5 rounded-lg bg-[#0F3B2E] text-[#FFF8EE] text-[11px] font-bold hover:bg-[#185241] transition-all flex items-center gap-1.5 flex-shrink-0 cursor-pointer disabled:opacity-50"
               >
-                <RefreshCw className={`w-3 h-3 text-[#C89B3C] ${isSyncingToSystem ? 'animate-spin' : ''}`} />
-                <span>{isSyncingToSystem ? 'Syncing...' : 'Sync to SQLite'}</span>
+                <RefreshCw className={`w-3 h-3 text-[#C89B3C] ${isSyncing ? 'animate-spin' : ''}`} />
+                <span>{isSyncing ? 'Syncing...' : 'Sync Now / Retry'}</span>
               </button>
             </div>
 
@@ -246,6 +401,42 @@ export const BackupModal: React.FC<BackupModalProps> = ({
                 <span>{syncFeedback.message}</span>
               </div>
             )}
+
+            {/* Advanced: Optional Custom Database URL */}
+            <div className="pt-2 border-t border-[#e5decb]/60">
+              <button
+                type="button"
+                onClick={() => setShowAdvancedDb(!showAdvancedDb)}
+                className="text-[11px] font-semibold text-[#5c7267] hover:text-[#0F3B2E] flex items-center gap-1 cursor-pointer"
+              >
+                <Settings2 className="w-3.5 h-3.5" />
+                <span>{showAdvancedDb ? 'Hide Cloud Database Settings' : 'Custom Cloud Database URL (Optional)'}</span>
+              </button>
+
+              {showAdvancedDb && (
+                <div className="mt-2 p-2.5 bg-white rounded-lg border border-[#e5decb] space-y-2 animate-in fade-in">
+                  <p className="text-[10px] text-gray-500">
+                    Connect your own PostgreSQL (Neon, Supabase) or Turso connection string:
+                  </p>
+                  <input
+                    type="password"
+                    value={customDbUrl}
+                    onChange={(e) => setCustomDbInput(e.target.value)}
+                    placeholder="postgres://... or libsql://..."
+                    className="w-full text-xs border border-[#d9cfbe] rounded px-2.5 py-1.5 font-mono text-gray-800"
+                  />
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={handleSaveCustomDbUrl}
+                      className="px-2.5 py-1 rounded bg-[#0F3B2E] text-white text-[11px] font-semibold"
+                    >
+                      {savedDbUrlFeedback ? 'Saved!' : 'Save Database URL'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Section 1: Export */}
