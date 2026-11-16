@@ -7,16 +7,24 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.resolve(__dirname, '..');
-const DATA_DIR = path.join(ROOT_DIR, 'data');
+const DATA_DIR = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NODE_ENV === 'production' && !fs.existsSync(path.join(ROOT_DIR, 'data'))
+  ? path.join('/tmp', 'finch_data')
+  : path.join(ROOT_DIR, 'data');
 const DB_PATH = path.join(DATA_DIR, 'finch.db');
 
 // Ensure local storage directory exists if running with local files
 if (!fs.existsSync(DATA_DIR)) {
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
-  } catch (e) {
-    // Read-only filesystem (e.g. serverless)
-  }
+  } catch (e) {}
+}
+
+// If running in a serverless environment with an initial packaged database, seed it into writable /tmp
+const packagedDb = path.join(ROOT_DIR, 'data', 'finch.db');
+if (fs.existsSync(packagedDb) && !fs.existsSync(DB_PATH) && DB_PATH !== packagedDb) {
+  try {
+    fs.copyFileSync(packagedDb, DB_PATH);
+  } catch (e) {}
 }
 
 /**
