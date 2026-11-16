@@ -1,6 +1,6 @@
 # Finch — Expense Tracker
 
-A modern, responsive, mobile-first web application designed for tracking corporate, operational, and capital expenditures for **Finch**, based in **Kottayam, Kerala, India**.
+A modern, responsive, mobile-first web application designed for tracking corporate, operational, and capital expenditures for **Finch**.
 
 ---
 
