@@ -48,21 +48,6 @@ const WORKSPACE_STORAGE_KEY = 'finch_workspace_id_v1';
 const CUSTOM_DB_URL_KEY = 'finch_custom_db_url_v1';
 const QUEUE_STORAGE_KEY = 'finch_offline_sync_queue_v1';
 const LAST_SYNCED_KEY = 'finch_last_synced_at_v1';
-const SESSION_TOKEN_KEY = 'finch_session_token_v1';
-
-export function getSessionToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem(SESSION_TOKEN_KEY);
-}
-
-export function setSessionToken(token: string | null): void {
-  if (typeof window === 'undefined') return;
-  if (token && token.trim()) {
-    localStorage.setItem(SESSION_TOKEN_KEY, token.trim());
-  } else {
-    localStorage.removeItem(SESSION_TOKEN_KEY);
-  }
-}
 
 // Default workspace identifier
 export const DEFAULT_WORKSPACE_ID = 'finch-kottayam';
@@ -168,101 +153,11 @@ function getHeaders(extraHeaders: Record<string, string> = {}): Record<string, s
     'x-workspace-id': getWorkspaceId(),
     ...extraHeaders,
   };
-  const token = getSessionToken();
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-    headers['x-session-token'] = token;
-  }
   const customDb = getCustomDbUrl();
   if (customDb) {
     headers['x-database-url'] = customDb;
   }
   return headers;
-}
-
-/**
- * Check if the Master Access Password has been set and if current session is authenticated
- */
-export async function getAuthStatus(): Promise<{ isPasswordSet: boolean; authenticated: boolean; locked: boolean }> {
-  try {
-    const res = await fetch(`${API_BASE}/auth/status`, {
-      method: 'GET',
-      headers: getHeaders(),
-    });
-    if (!res.ok) {
-      return { isPasswordSet: true, authenticated: false, locked: true };
-    }
-    return await res.json();
-  } catch (e) {
-    // If backend is offline or unreachable, check if local session token exists
-    const token = getSessionToken();
-    return {
-      isPasswordSet: true,
-      authenticated: Boolean(token),
-      locked: !Boolean(token),
-    };
-  }
-}
-
-/**
- * Set the Master Access Password permanently (first-time setup only)
- */
-export async function setupMasterPassword(password: string): Promise<{ success: boolean; token?: string; error?: string }> {
-  try {
-    const res = await fetch(`${API_BASE}/auth/setup`, {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify({ password }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (res.ok && data.token) {
-      setSessionToken(data.token);
-      return { success: true, token: data.token };
-    }
-    return { success: false, error: data.error || 'Failed to set master password.' };
-  } catch (err) {
-    return { success: false, error: 'Network error connecting to auth server.' };
-  }
-}
-
-/**
- * Login / Unlock the tracker using the Master Access Password
- */
-export async function loginWithMasterPassword(
-  password: string
-): Promise<{ success: boolean; token?: string; error?: string; cooldownSeconds?: number }> {
-  try {
-    const res = await fetch(`${API_BASE}/auth/login`, {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify({ password }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (res.ok && data.token) {
-      setSessionToken(data.token);
-      return { success: true, token: data.token };
-    }
-    return {
-      success: false,
-      error: data.error || 'Incorrect master password.',
-      cooldownSeconds: data.cooldownSeconds,
-    };
-  } catch (err) {
-    return { success: false, error: 'Network error connecting to auth server.' };
-  }
-}
-
-/**
- * Manually lock the tracker and invalidate session
- */
-export async function logoutMasterPassword(): Promise<void> {
-  try {
-    await fetch(`${API_BASE}/auth/logout`, {
-      method: 'POST',
-      headers: getHeaders(),
-    });
-  } catch (e) {}
-  setSessionToken(null);
 }
 
 // Offline Queue Management

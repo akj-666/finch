@@ -10,7 +10,6 @@ import { BackupModal } from './components/BackupModal';
 import { ReceiptViewerModal } from './components/ReceiptViewerModal';
 import { NoticeModal } from './components/NoticeModal';
 import { SplashScreen } from './components/SplashScreen';
-import { LockScreen } from './components/LockScreen';
 import {
   Expense,
   FilterState,
@@ -38,8 +37,6 @@ import {
   SyncStatusInfo,
   getSyncStatus,
   getCustomDbUrl,
-  getAuthStatus,
-  logoutMasterPassword,
 } from './utils/apiSync';
 import { CheckCircle2, AlertCircle, X, Plus, MapPin, HardDrive } from 'lucide-react';
 import finchIconPng from './assets/finch-icon.png';
@@ -48,17 +45,6 @@ import finchIconLightPng from './assets/finch-icon-light.png';
 export const App: React.FC = () => {
   // Mobile Splash screen state
   const [showSplash, setShowSplash] = useState(true);
-
-  // Master Access Password Authentication State
-  const [authStatus, setAuthStatus] = useState<{
-    isChecking: boolean;
-    isPasswordSet: boolean;
-    authenticated: boolean;
-  }>({
-    isChecking: true,
-    isPasswordSet: true,
-    authenticated: false,
-  });
 
   // Primary expenses state
   const [expenses, setExpenses] = useState<Expense[]>(() => loadExpenses());
@@ -123,23 +109,6 @@ export const App: React.FC = () => {
     }, 3500);
   };
 
-  // 0. Verify Master Password Access Status on Mount
-  useEffect(() => {
-    let isMounted = true;
-    (async () => {
-      const status = await getAuthStatus();
-      if (!isMounted) return;
-      setAuthStatus({
-        isChecking: false,
-        isPasswordSet: status.isPasswordSet,
-        authenticated: status.authenticated,
-      });
-    })();
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
   // 1. Live Sync Status Subscription
   useEffect(() => {
     const unsubscribe = subscribeSyncStatus((info) => {
@@ -149,9 +118,8 @@ export const App: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // 2. Initial Cross-Device Sync & Workspace Reconciliation (only when authenticated)
+  // 2. Initial Cross-Device Sync & Workspace Reconciliation
   useEffect(() => {
-    if (!authStatus.authenticated) return;
     let isMounted = true;
     (async () => {
       const health = await getSystemHealth();
@@ -170,33 +138,12 @@ export const App: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [authStatus.authenticated]);
+  }, []);
 
   // 3. Sync with browser localStorage as reliable local cache
   useEffect(() => {
-    if (authStatus.authenticated) {
-      saveExpenses(expenses);
-    }
-  }, [expenses, authStatus.authenticated]);
-
-  const handleAuthSuccess = () => {
-    setAuthStatus((prev) => ({
-      ...prev,
-      authenticated: true,
-      isPasswordSet: true,
-    }));
-    setExpenses(loadExpenses());
-    showToast('Tracker unlocked with master access.', 'success');
-  };
-
-  const handleLockTracker = async () => {
-    await logoutMasterPassword();
-    setAuthStatus((prev) => ({
-      ...prev,
-      authenticated: false,
-    }));
-    showToast('Expense tracker locked.', 'info');
-  };
+    saveExpenses(expenses);
+  }, [expenses]);
 
   // Handle Sort Toggle
   const handleSortChange = (column: SortColumn) => {
@@ -539,45 +486,12 @@ export const App: React.FC = () => {
 
   const timelineLabel = formatTimeline(filters.startDate, filters.endDate);
 
-  // Mobile-first branded Finch splash screen on app launch
-  if (showSplash) {
-    return (
-      <SplashScreen
-        onComplete={() => setShowSplash(false)}
-        minDuration={1100}
-      />
-    );
-  }
-
-  if (authStatus.isChecking) {
-    return (
-      <div className="min-h-screen bg-[#FFF8EE] flex items-center justify-center p-4">
-        <div className="flex flex-col items-center space-y-3 animate-in fade-in duration-200">
-          <div className="w-12 h-12 rounded-2xl bg-[#0F3B2E] flex items-center justify-center shadow-md animate-pulse">
-            <img src={finchIconLightPng} alt="Finch" className="w-6 h-6 object-contain" />
-          </div>
-          <span className="text-xs font-semibold text-[#0F3B2E]">Verifying Security Access...</span>
-        </div>
-      </div>
-    );
-  }
-
-  if (!authStatus.authenticated) {
-    return (
-      <LockScreen
-        isFirstTimeSetup={!authStatus.isPasswordSet}
-        onAuthenticated={handleAuthSuccess}
-      />
-    );
-  }
-
   return (
     <div className="min-h-screen bg-[#FFF8EE] flex flex-col font-sans">
       {/* Top Navigation & App Header */}
       <Header
         onDownloadPDF={handleDownloadPDF}
         onOpenBackup={() => setIsBackupModalOpen(true)}
-        onLockTracker={handleLockTracker}
         filteredExpensesCount={filteredExpenses.length}
         filteredSpend={summary.totalSpend}
         allExpenses={expenses}
@@ -768,6 +682,14 @@ export const App: React.FC = () => {
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
+      )}
+
+      {/* Mobile-first branded Finch splash screen */}
+      {showSplash && (
+        <SplashScreen
+          onComplete={() => setShowSplash(false)}
+          minDuration={1100}
+        />
       )}
     </div>
   );

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FileDown, Database, Menu, X, ShieldCheck, MapPin, RefreshCw, Lock } from 'lucide-react';
+import { FileDown, Database, Menu, X, ShieldCheck, MapPin, RefreshCw } from 'lucide-react';
 import { Expense } from '../types';
 import { SyncStatusInfo } from '../utils/apiSync';
 import finchLogoLightPng from '../assets/finch-logo-light.png';
@@ -8,7 +8,6 @@ import finchIconLightPng from '../assets/finch-icon-light.png';
 interface HeaderProps {
   onDownloadPDF: () => void;
   onOpenBackup: () => void;
-  onLockTracker?: () => void;
   filteredExpensesCount: number;
   filteredSpend: number;
   allExpenses: Expense[];
@@ -21,7 +20,6 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   onDownloadPDF,
   onOpenBackup,
-  onLockTracker,
   filteredExpensesCount,
   filteredSpend,
   allExpenses,
@@ -107,7 +105,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={onOpenBackup}
               title="Backup, export CSV, and cross-device sync"
-              className="inline-flex items-center space-x-2 px-3.5 py-2 rounded-lg bg-[#185241] hover:bg-[#206953] text-[#FFF8EE] text-xs font-semibold transition-colors border border-[#2b7760]/50 shadow-xs cursor-pointer"
+              className="inline-flex items-center space-x-2 px-3.5 py-2 rounded-lg bg-[#185241] hover:bg-[#206953] text-[#FFF8EE] text-xs font-semibold transition-colors border border-[#2b7760]/50 shadow-xs"
             >
               <Database className="w-3.5 h-3.5 text-[#C89B3C]" />
               <span>Data & Backup</span>
@@ -117,40 +115,18 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={onDownloadPDF}
               title={`Download PDF report for: ${timelineLabel}`}
-              className="inline-flex items-center space-x-2 px-4 py-2 rounded-lg bg-[#185241] hover:bg-[#206953] text-[#FFF8EE] text-xs font-bold transition-all border border-[#2b7760]/60 shadow-xs hover:border-[#C89B3C]/50 cursor-pointer"
+              className="inline-flex items-center space-x-2 px-4 py-2 rounded-lg bg-[#185241] hover:bg-[#206953] text-[#FFF8EE] text-xs font-bold transition-all border border-[#2b7760]/60 shadow-xs hover:border-[#C89B3C]/50"
             >
               <FileDown className="w-4 h-4 text-[#C89B3C]" />
               <span>Download PDF Report</span>
             </button>
-
-            {/* Strict Master Password Lock / Logout */}
-            {onLockTracker && (
-              <button
-                onClick={onLockTracker}
-                title="Lock expense tracker with master password"
-                className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-lg bg-[#0A261E] hover:bg-[#071d17] text-[#C89B3C] text-xs font-bold transition-all border border-[#C89B3C]/50 shadow-xs hover:border-[#C89B3C] cursor-pointer"
-              >
-                <Lock className="w-3.5 h-3.5 text-[#C89B3C]" />
-                <span>Lock</span>
-              </button>
-            )}
           </div>
 
-          {/* Mobile Actions: Sync Pill + Download PDF + Lock + Menu Button */}
+          {/* Mobile Actions: Sync Pill + Download PDF + Menu Button */}
           <div className="md:hidden flex items-center space-x-1.5">
             <div className="mr-0.5">
               {renderSyncBadge()}
             </div>
-            {onLockTracker && (
-              <button
-                onClick={onLockTracker}
-                className="p-2 rounded-lg bg-[#0A261E] text-[#C89B3C] border border-[#C89B3C]/50 hover:bg-[#12382c]"
-                aria-label="Lock Tracker"
-                title="Lock Tracker"
-              >
-                <Lock className="w-4 h-4" />
-              </button>
-            )}
             <button
               onClick={onDownloadPDF}
               className="p-2 rounded-lg bg-[#185241] text-[#FFF8EE] hover:bg-[#206953] border border-[#2b7760]/60 flex items-center gap-1.5 text-xs font-semibold"
@@ -212,19 +188,6 @@ export const Header: React.FC<HeaderProps> = ({
               <span>Data & Backup</span>
             </button>
           </div>
-
-          {onLockTracker && (
-            <button
-              onClick={() => {
-                setMobileMenuOpen(false);
-                onLockTracker();
-              }}
-              className="w-full flex items-center justify-center space-x-2 px-3 py-2.5 rounded-lg bg-[#0A261E] hover:bg-[#071d17] text-xs font-bold text-[#C89B3C] border border-[#C89B3C]/50"
-            >
-              <Lock className="w-4 h-4 text-[#C89B3C]" />
-              <span>Lock Tracker with Password</span>
-            </button>
-          )}
 
           <div className="pt-2 text-[11px] text-[#7e998e] flex items-center justify-between border-t border-[#185241]">
             <span>Cross-Device Cloud Sync</span>
